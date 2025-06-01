@@ -878,7 +878,7 @@ def main():
     st.sidebar.header("Analysis Parameters")
     
     # Ticker selection
-    default_tickers = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'TSLA']
+    default_tickers = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'TSLA', 'GLD', 'NDX']
     selected_tickers = st.sidebar.multiselect(
         "Select Stock Tickers",
         options=default_tickers + ['NVDA', 'GOOGL', 'AMZN', 'META', 'NFLX', 'IWM', 'DIA'],
@@ -1314,14 +1314,18 @@ def main():
                         
                         st.markdown('</div>', unsafe_allow_html=True)
                         
+                        # Show which data source is being used
+                        st.info(f"📊 Using **daily** data for {strategy_timeframe} options strategy analysis")
+                        
                         # Visual representation
                         st.info(f"""
                         **95% Confidence Range**: There is a 95% probability that {strategy_ticker} will trade between 
-                        **${lower_bound:.2f}** and **${upper_bound:.2f}** based on current ATR of ${atr:.2f}.
+                        **${lower_bound:.2f}** and **${upper_bound:.2f}** based on daily ATR of ${atr:.2f}.
                         
                         - **2.5% chance** price goes below ${lower_bound:.2f}
                         - **2.5% chance** price goes above ${upper_bound:.2f}
                         - **Range represents ±{z_score_95} standard deviations** from current price
+                        - **Data source**: daily analysis
                         """)
                         
                 except Exception as e:
@@ -1363,8 +1367,18 @@ def main():
                     
                     # Enhanced analysis with 95% probability ranges
                     if strategy_ticker in results and 'daily' in results[strategy_ticker] and results[strategy_ticker]['daily'] is not None:
-                        daily_data = results[strategy_ticker]['daily']['data']
-                        atr = results[strategy_ticker]['daily']['atr']
+                        # Select appropriate data based on timeframe
+                        if strategy_timeframe == 'weekly' and 'weekly' in results[strategy_ticker] and results[strategy_ticker]['weekly'] is not None:
+                            analysis_data = results[strategy_ticker]['weekly']['data']
+                            atr = results[strategy_ticker]['weekly']['atr']
+                            data_source = "weekly"
+                        else:
+                            analysis_data = results[strategy_ticker]['daily']['data']
+                            atr = results[strategy_ticker]['daily']['atr']
+                            data_source = "daily"
+                        
+                        # Show which data source is being used
+                        st.info(f"📊 Using **{data_source}** data for {strategy_timeframe} options strategy analysis")
                         
                         # Calculate 95% probability range
                         z_score_95 = 1.96
@@ -1430,7 +1444,7 @@ def main():
                         # Calculate probability distribution for more accurate analysis
                         lookback_days = 10 if strategy_timeframe == 'weekly' else 14
                         prob_dist = calculate_probability_distribution(
-                            daily_data, current_price, strategy_timeframe, lookback_days
+                            analysis_data, current_price, strategy_timeframe, lookback_days
                         )
                         
                         if prob_dist:
@@ -1548,8 +1562,12 @@ def main():
                         st.success("✅ Enhanced options strategy analysis complete!")
                         
                     else:
-                        st.error(f"❌ No daily data available for {strategy_ticker}")
-                        st.error("Please ensure daily analysis was included in the main analysis")
+                        if strategy_timeframe == 'weekly':
+                            st.error(f"❌ No weekly data available for {strategy_ticker}")
+                            st.error("Please ensure weekly analysis was included in the main analysis")
+                        else:
+                            st.error(f"❌ No daily data available for {strategy_ticker}")
+                            st.error("Please ensure daily analysis was included in the main analysis")
                 
                 except Exception as e:
                     st.error(f"❌ Unexpected error: {str(e)}")
@@ -1582,7 +1600,7 @@ def main():
         with col1:
             strategy_ticker = st.selectbox(
                 "Select ticker for options strategy:",
-                selected_tickers if selected_tickers else ['SPY'],
+                selected_tickers if selected_tickers else ['SPY', 'QQQ', 'GLD', 'NDX'],
                 help="Choose the ticker you want to trade options on",
                 key="standalone_ticker"
             )
@@ -1728,7 +1746,7 @@ def main():
                         st.dataframe(custom_df, use_container_width=True)
                     
                     except ValueError:
-                        st.error("❌ Invalid strike format. Please use comma-separated numbers (e.g., 580, 575, 570)")
+                        st.error("❌ Invalid strike format. Please use comma-separated numbers")
                     except Exception as e:
                         st.error(f"❌ Custom strikes analysis failed: {str(e)}")
                 
