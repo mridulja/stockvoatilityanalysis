@@ -9,6 +9,14 @@ A comprehensive Streamlit-based application for stock market analysis, volatilit
 - **Daily Analysis**: Traditional daily range analysis with enhanced ATR calculations
 - **Weekly Analysis**: Longer-term volatility trends and patterns
 
+### 🤖 AI-Powered Analysis & Recommendations (NEW!)
+- **GPT-4o-mini Integration**: Professional trading analysis using OpenAI's latest model
+- **Automatic Analysis**: AI insights generated automatically after options strategy completion
+- **Natural Language Summaries**: Human-readable interpretations of complex data
+- **Actionable Recommendations**: Specific trading actions and risk management
+- **Market Condition Assessment**: AI-powered market overview and timing guidance
+- **Risk Management Insights**: Position sizing and stop-loss recommendations
+
 ### 🎯 Advanced Options Strategy Engine
 - **95% Probability Range**: Statistical confidence intervals using Z-score methodology
 - **PUT Spread Recommendations**: Data-driven strike price suggestions
@@ -83,6 +91,31 @@ streamlit_stock_app_complete.py (Main Application)
 
 5. **Access the app**: Open your browser to `http://localhost:8501`
 
+### 🤖 **AI Analysis Setup (Optional)**
+To enable AI-powered analysis and recommendations:
+
+1. **Get OpenAI API Key**:
+   - Visit https://platform.openai.com/api-keys
+   - Create a new API key
+   - Copy the key (starts with `sk-`)
+
+2. **Set Environment Variable**:
+   ```bash
+   # Option 1: Set environment variable
+   export OPENAI_API_KEY=your_api_key_here
+   
+   # Option 2: Create .env file
+   echo "OPENAI_API_KEY=your_api_key_here" > .env
+   ```
+
+3. **Restart the application** to enable AI features
+
+4. **AI Features Available**:
+   - 🧠 **Options Strategy Analysis**: Comprehensive trading recommendations
+   - 🌟 **Market Summary**: Overall market condition assessment
+   - 📋 **Risk Management**: Position sizing and stop-loss guidance
+   - 🎯 **Entry/Exit Criteria**: Specific trading actions
+
 ## 📖 Usage Guide
 
 ### 🔧 Initial Setup
@@ -128,26 +161,27 @@ streamlit_stock_app_complete.py (Main Application)
 - **Strike Recommendations**: Data-driven PUT spread suggestions
 - **Custom Analysis**: User-defined strike price assessment
 - **Risk Assessment**: Multi-level probability zones
+- **🤖 AI Analysis**: Professional trading recommendations (if OpenAI API key configured)
 
-### 🎯 Options Strategy Features
+### 🤖 **AI-Powered Features**
 
-#### 95% Probability Range Calculation
-```
-Upper Bound = Current Price + (1.96 × ATR)
-Lower Bound = Current Price - (1.96 × ATR)
-```
+#### Options Strategy AI Analysis
+1. Complete the **Enhanced Options Strategy** analysis
+2. **AI analysis runs automatically** - no additional steps needed!
+3. Review comprehensive AI insights displayed at the top including:
+   - **Executive Summary**: Overall strategy assessment
+   - **Risk Management**: Position sizing and stop-loss guidance
+   - **Market Conditions**: VIX impact and timing considerations
+   - **Actionable Recommendations**: Specific trading actions
 
-#### Confidence Levels
-- **90% Confidence**: Z-score 1.645 (Aggressive strategy)
-- **95% Confidence**: Z-score 1.96 (Moderate strategy) 
-- **99% Confidence**: Z-score 2.576 (Conservative strategy)
-
-#### VIX-Based Trade Approval
-- **🟢 VIX < 15**: Calm Markets - Normal position sizing
-- **🔵 VIX 15-19**: Normal Markets - Standard approach
-- **🟡 VIX 19-26**: Choppy Markets - Reduce position sizes
-- **🔴 VIX 26-36**: High Volatility - Avoid trading
-- **🚨 VIX > 36**: Extreme Volatility - DO NOT TRADE
+#### Market Summary AI Analysis
+1. Navigate to the **📊 Summary** tab
+2. Check **"🧠 Generate AI Market Overview"**
+3. Click **"🚀 Generate Market Summary"**
+4. Review AI-powered market assessment covering:
+   - **Volatility Environment**: Overall market conditions
+   - **Trading Opportunities**: Risk/reward scenarios
+   - **Key Recommendations**: Strategic guidance for options traders
 
 ## 🔬 Advanced Features
 

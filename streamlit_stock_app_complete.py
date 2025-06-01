@@ -36,6 +36,22 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, date
 from scipy import stats
 import warnings
+import os
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed, will rely on system environment variables
+
+# Import LLM analysis functionality
+try:
+    from llm_analysis import get_llm_analyzer, format_vix_data_for_llm, format_confidence_levels_for_llm
+    LLM_AVAILABLE = True
+except ImportError:
+    LLM_AVAILABLE = False
+    st.warning("⚠️ LLM analysis not available. Install OpenAI package for AI-powered insights.")
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
@@ -1078,6 +1094,82 @@ def main():
             
             summary_df = pd.DataFrame(summary_data)
             st.dataframe(summary_df, use_container_width=True)
+            
+            # Market Summary LLM Analysis
+            if LLM_AVAILABLE:
+                st.markdown("---")
+                st.markdown("### 🤖 AI Market Summary")
+                
+                # Add toggle for market summary
+                enable_market_summary = st.checkbox(
+                    "🧠 Generate AI Market Overview", 
+                    value=False,
+                    help="Generate AI-powered market condition summary",
+                    key="market_summary_toggle"
+                )
+                
+                if enable_market_summary:
+                    api_key_available = bool(os.getenv('OPENAI_API_KEY'))
+                    
+                    if not api_key_available:
+                        st.warning("⚠️ OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
+                    else:
+                        if st.button("🚀 Generate Market Summary", type="secondary", key="market_summary_btn"):
+                            with st.spinner("🤖 AI is analyzing market conditions..."):
+                                try:
+                                    llm_analyzer = get_llm_analyzer()
+                                    
+                                    if llm_analyzer is None:
+                                        st.error("❌ Failed to initialize AI analyzer")
+                                    else:
+                                        # Prepare VIX data for market summary
+                                        vix_summary_data = None
+                                        if include_vix and vix_data is not None:
+                                            current_vix = vix_data['VIX_Close'].iloc[-1]
+                                            condition, _, _ = get_vix_condition(current_vix)
+                                            vix_summary_data = {
+                                                'current_vix': current_vix,
+                                                'condition': condition
+                                            }
+                                        
+                                        # Generate market summary
+                                        market_summary_result = llm_analyzer.generate_market_summary(
+                                            ticker_results=results,
+                                            vix_data=vix_summary_data
+                                        )
+                                        
+                                        if market_summary_result['success']:
+                                            # Display market summary with modern styling
+                                            st.markdown("""
+                                            <div style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); 
+                                                        padding: 2rem; border-radius: 16px; margin: 1rem 0; 
+                                                        border-left: 6px solid var(--success-color); box-shadow: var(--shadow-lg);">
+                                                <h4 style="color: var(--success-color); margin: 0 0 1rem 0; font-weight: 700;">
+                                                    🌟 Market Condition Overview
+                                                </h4>
+                                            </div>
+                                            """, unsafe_allow_html=True)
+                                            
+                                            # Display the market summary
+                                            st.markdown(market_summary_result['analysis'])
+                                            
+                                            # Show summary metadata
+                                            col1, col2 = st.columns(2)
+                                            with col1:
+                                                st.metric("Tokens Used", market_summary_result['tokens_used'])
+                                            with col2:
+                                                st.metric("Summary Time", 
+                                                        datetime.fromisoformat(market_summary_result['timestamp']).strftime("%H:%M:%S"))
+                                            
+                                            st.success("✅ Market summary complete!")
+                                        
+                                        else:
+                                            st.error(f"❌ Market summary failed: {market_summary_result['error']}")
+                                
+                                except Exception as e:
+                                    st.error(f"❌ Unexpected error in market summary: {str(e)}")
+            else:
+                st.info("💡 **Note**: Install OpenAI package to enable AI-powered market summaries.")
         
         with tab2:
             st.subheader("📈 Interactive Price Charts with Enhanced ATR")
@@ -1560,6 +1652,106 @@ def main():
                                 st.error("❌ Invalid strike format. Please use comma-separated numbers")
                         
                         st.success("✅ Enhanced options strategy analysis complete!")
+                        
+                        # Automatic LLM Analysis - runs immediately after strategy completion
+                        if LLM_AVAILABLE:
+                            # Check for OpenAI API key
+                            api_key_available = bool(os.getenv('OPENAI_API_KEY'))
+                            
+                            if api_key_available:
+                                st.markdown("---")
+                                st.markdown("### 🤖 AI-Powered Professional Analysis")
+                                
+                                with st.spinner("🤖 AI is analyzing your options strategy..."):
+                                    try:
+                                        # Get LLM analyzer
+                                        llm_analyzer = get_llm_analyzer()
+                                        
+                                        if llm_analyzer is not None:
+                                            # Prepare VIX data for LLM
+                                            vix_data_for_llm = None
+                                            if 'condition' in locals() and 'latest_vix' in locals():
+                                                vix_data_for_llm = format_vix_data_for_llm(
+                                                    latest_vix, condition, trade_approved
+                                                )
+                                            
+                                            # Prepare confidence levels data
+                                            confidence_data_for_llm = format_confidence_levels_for_llm(conf_data)
+                                            
+                                            # Generate LLM analysis automatically
+                                            llm_result = llm_analyzer.analyze_options_strategy(
+                                                ticker=strategy_ticker,
+                                                current_price=current_price,
+                                                strategy_timeframe=strategy_timeframe,
+                                                recommendations=recommendations,
+                                                prob_dist=prob_dist,
+                                                vix_data=vix_data_for_llm,
+                                                atr=atr,
+                                                confidence_levels=confidence_data_for_llm
+                                            )
+                                            
+                                            if llm_result['llm_analysis']['success']:
+                                                # Display AI analysis with modern styling at the top
+                                                st.markdown("""
+                                                <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); 
+                                                            padding: 2rem; border-radius: 16px; margin: 1rem 0; 
+                                                            border-left: 6px solid var(--secondary-color); box-shadow: var(--shadow-lg);">
+                                                    <h3 style="color: var(--secondary-color); margin: 0 0 1rem 0; font-weight: 700;">
+                                                        🤖 Professional AI Trading Analysis
+                                                    </h3>
+                                                </div>
+                                                """, unsafe_allow_html=True)
+                                                
+                                                # Display the AI analysis
+                                                ai_analysis = llm_result['llm_analysis']['analysis']
+                                                st.markdown(ai_analysis)
+                                                
+                                                # Show analysis metadata in an expander
+                                                with st.expander("📊 Analysis Metadata"):
+                                                    col1, col2, col3 = st.columns(3)
+                                                    with col1:
+                                                        st.metric("Tokens Used", llm_result['llm_analysis']['tokens_used'])
+                                                    with col2:
+                                                        st.metric("Model", llm_result['llm_analysis']['model'])
+                                                    with col3:
+                                                        st.metric("Analysis Time", 
+                                                                datetime.fromisoformat(llm_result['llm_analysis']['timestamp']).strftime("%H:%M:%S"))
+                                                
+                                                st.success("✅ AI analysis complete!")
+                                            
+                                            else:
+                                                st.warning(f"⚠️ AI analysis failed: {llm_result['llm_analysis']['error']}")
+                                        
+                                        else:
+                                            st.warning("⚠️ Failed to initialize AI analyzer")
+                                            
+                                    except Exception as e:
+                                        st.warning(f"⚠️ AI analysis error: {str(e)}")
+                            
+                            else:
+                                # Show setup instructions for missing API key
+                                st.markdown("---")
+                                st.markdown("### 🤖 AI Analysis Available")
+                                st.info("💡 **Set up your OpenAI API key to unlock professional AI trading analysis!**")
+                                
+                                with st.expander("🔑 Quick Setup Instructions"):
+                                    st.markdown("""
+                                    **To enable automatic AI analysis:**
+                                    1. Get an OpenAI API key from https://platform.openai.com/api-keys
+                                    2. Set it as an environment variable: `OPENAI_API_KEY=your-key-here`
+                                    3. **Or** create a `.env` file with: `OPENAI_API_KEY=your-key-here`
+                                    4. Restart the application
+                                    
+                                    **Features you'll unlock:**
+                                    - 🧠 **Executive Summary**: Overall strategy assessment
+                                    - 📋 **Risk Management**: Position sizing and stop-loss guidance  
+                                    - 🎯 **Entry/Exit Criteria**: Specific trading actions
+                                    - 📊 **Market Conditions**: VIX impact and timing analysis
+                                    """)
+                        
+                        else:
+                            st.markdown("---")
+                            st.info("💡 **Note**: Install OpenAI package to enable automatic AI-powered analysis and recommendations.")
                         
                     else:
                         if strategy_timeframe == 'weekly':
