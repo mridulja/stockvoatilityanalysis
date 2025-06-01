@@ -1,3 +1,31 @@
+"""
+Enhanced Stock Volatility Analyzer with Advanced Options Strategy
+
+This Streamlit application provides comprehensive stock market analysis with a focus on volatility 
+measurement and options trading strategies. It combines technical analysis, statistical modeling, 
+and market condition assessment to provide data-driven trading recommendations.
+
+Key Features:
+- Multi-timeframe volatility analysis (hourly, daily, weekly)
+- Enhanced ATR (Average True Range) calculations with True Range methodology
+- VIX market condition assessment and trading recommendations  
+- Advanced options strategy with 95% probability range calculations
+- Interactive charts with Plotly for price action and volatility visualization
+- Cross-ticker comparison and correlation analysis
+- Probability-based PUT spread recommendations using statistical modeling
+
+Technical Implementation:
+- Uses scipy.stats for probability distribution calculations
+- Implements True Range formula: max(H-L, |H-C_prev|, |L-C_prev|)
+- Calculates 95% confidence intervals using Z-score of 1.96
+- VIX-based market condition filtering for trade approval
+- Session state persistence for analysis results
+
+Author: Mridul Jain
+Date: 2025
+Version: 2.0 - Enhanced with 95% probability analysis
+"""
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -8,6 +36,8 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, date
 from scipy import stats
 import warnings
+
+# Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
 
 # Page configuration
@@ -1348,6 +1378,7 @@ def main():
                 
                 if current_price is None:
                     st.error(f"❌ Could not fetch current price for {strategy_ticker}")
+                    st.error("Please try again or select a different ticker")
                     return
                 
                 st.success(f"✅ Current price fetched: ${current_price:.2f}")
@@ -1355,16 +1386,17 @@ def main():
                 st.markdown(f"### 📊 Basic Analysis for {strategy_ticker}")
                 st.info(f"**Current Price**: ${current_price:.2f} | **Trade Date**: {trade_date} | **Timeframe**: {strategy_timeframe}")
                 
-                # Basic demonstration strategy
-                st.markdown("### 🎯 Basic PUT Strategy Demonstration")
+                # Generate basic PUT strike recommendations
+                st.markdown("### 🎯 Basic PUT Strategy")
                 
-                # Calculate some basic strikes
+                # Calculate distance-based strikes (2%, 4%, 6%, 8%, 10% below current price)
                 strikes_below = []
                 for i in range(num_recommendations):
-                    pct_below = (i + 1) * 2  # 2%, 4%, 6%, etc.
+                    pct_below = (i + 1) * 2
                     strike = current_price * (1 - pct_below/100)
                     strikes_below.append(round(strike, 2))
                 
+                # Create recommendations table
                 st.markdown("### 📋 Suggested PUT Strike Prices")
                 strike_data = []
                 for i, strike in enumerate(strikes_below):
@@ -1376,13 +1408,13 @@ def main():
                         'Strike Price': f"${strike:.2f}",
                         'Distance': f"${distance:.2f}",
                         'Distance %': f"{distance_pct:.1f}%",
-                        'Recommendation': 'CONSERVATIVE' if distance_pct > 5 else 'AGGRESSIVE'
+                        'Risk Assessment': 'Conservative' if distance_pct > 5 else 'Aggressive'
                     })
                 
                 strike_df = pd.DataFrame(strike_data)
                 st.dataframe(strike_df, use_container_width=True)
                 
-                # Best recommendation
+                # Display best recommendation
                 best_strike = strikes_below[0]
                 st.markdown('<div class="strike-recommend">', unsafe_allow_html=True)
                 st.markdown(f"""
@@ -1396,7 +1428,7 @@ def main():
                 """)
                 st.markdown('</div>', unsafe_allow_html=True)
                 
-                # Custom strikes analysis
+                # Process custom strikes if provided
                 if custom_strikes_input:
                     try:
                         custom_strikes = [float(x.strip()) for x in custom_strikes_input.split(',')]
@@ -1409,11 +1441,19 @@ def main():
                             distance = current_price - strike
                             distance_pct = (distance / current_price) * 100
                             
+                            # Basic risk assessment based on distance
+                            if distance_pct > 5:
+                                risk_level = 'LOW'
+                            elif distance_pct > 2:
+                                risk_level = 'MEDIUM'
+                            else:
+                                risk_level = 'HIGH'
+                            
                             custom_data.append({
                                 'Strike': f"${strike:.2f}",
                                 'Distance': f"${distance:.2f}",
                                 'Distance %': f"{distance_pct:.1f}%",
-                                'Risk Level': 'LOW' if distance_pct > 5 else 'MEDIUM' if distance_pct > 2 else 'HIGH'
+                                'Risk Level': risk_level
                             })
                         
                         custom_df = pd.DataFrame(custom_data)
