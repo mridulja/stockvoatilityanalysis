@@ -189,6 +189,11 @@ class PutSpreadAnalyzer:
         """
         Calculate probability of profit for vertical put spread using Black-Scholes
         
+        For a short put spread (sell higher strike, buy lower strike):
+        - We profit if stock stays above the breakeven price
+        - Simplified POP: probability stock stays above short strike
+        - Formula: POP = N(d2_short) where d2 = d1 - σ√T
+        
         Args:
             current_price: Current stock price (S)
             long_strike: Long put strike price (A)
@@ -208,8 +213,7 @@ class PutSpreadAnalyzer:
             return 0.0
         
         S = current_price
-        A = long_strike
-        B = short_strike
+        B = short_strike  # Short strike (higher)
         T = time_to_expiry
         sigma = volatility
         r = risk_free_rate
@@ -218,12 +222,13 @@ class PutSpreadAnalyzer:
         sqrt_T = np.sqrt(T)
         sigma_sqrt_T = sigma * sqrt_T
         
-        # Calculate d1 and d2 for both strikes
-        d1_B = (np.log(S / B) + (r - q + 0.5 * sigma**2) * T) / sigma_sqrt_T
-        d1_A = (np.log(S / A) + (r - q + 0.5 * sigma**2) * T) / sigma_sqrt_T
+        # Calculate d1 and d2 for short strike
+        d1_short = (np.log(S / B) + (r - q + 0.5 * sigma**2) * T) / sigma_sqrt_T
+        d2_short = d1_short - sigma_sqrt_T
         
-        # Probability of profit = N(d1_B) - N(d1_A)
-        prob_profit = stats.norm.cdf(d1_B) - stats.norm.cdf(d1_A)
+        # CORRECT POP FORMULA: Probability stock stays above short strike
+        # POP = N(d2_short)
+        prob_profit = stats.norm.cdf(d2_short)
         
         return max(0.0, min(1.0, prob_profit))  # Bound between 0 and 1
     
