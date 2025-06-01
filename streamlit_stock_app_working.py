@@ -41,9 +41,6 @@ st.markdown("""
     .vix-extreme { background-color: #f5c6cb; padding: 0.5rem; border-radius: 0.25rem; }
     .trade-recommend { background-color: #e7f3ff; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #0066cc; }
     .strike-recommend { background-color: #f0fff4; padding: 0.75rem; border-radius: 0.5rem; border: 1px solid #28a745; }
-    .stSelectbox > div > div > select {
-        background-color: #ffffff;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -73,7 +70,7 @@ def should_trade(vix_value):
     else:
         return False, "VIX too high - Avoid trading"
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=300)
 def fetch_stock_data(ticker, start_date, end_date, interval='1h'):
     """Fetch stock data with caching"""
     try:
@@ -154,6 +151,87 @@ def calculate_true_range(data):
     data.loc[data.index[0], 'true_range'] = data.loc[data.index[0], 'tr1']
     
     return data['true_range']
+
+def calculate_volatility_metrics(data, timeframe='hourly', vix_data=None):
+    """Calculate volatility metrics for given timeframe"""
+    if data is None or data.empty:
+        return None
+    
+    # Calculate ranges and true range
+    data = data.copy()
+    data['range'] = data['High'] - data['Low']
+    
+    # Calculate true range for better ATR
+    true_range = calculate_true_range(data)
+    if true_range is not None:
+        data['true_range'] = true_range
+    else:
+        data['true_range'] = data['range']  # Fallback to simple range
+    
+    # Resample based on timeframe
+    if timeframe == 'daily':
+        resampled = data.resample('D').agg({
+            'High': 'max', 
+            'Low': 'min', 
+            'Close': 'last', 
+            'Volume': 'sum',
+            'range': 'max',
+            'true_range': 'max'
+        })
+        resampled['range'] = resampled['High'] - resampled['Low']
+        daily_tr = calculate_true_range(resampled)
+        if daily_tr is not None:
+            resampled['true_range'] = daily_tr
+    elif timeframe == 'weekly':
+        resampled = data.resample('W').agg({
+            'High': 'max', 
+            'Low': 'min', 
+            'Close': 'last', 
+            'Volume': 'sum',
+            'range': 'max',
+            'true_range': 'max'
+        })
+        resampled['range'] = resampled['High'] - resampled['Low']
+        weekly_tr = calculate_true_range(resampled)
+        if weekly_tr is not None:
+            resampled['true_range'] = weekly_tr
+    else:  # hourly
+        resampled = data
+    
+    # Remove any rows with NaN values
+    resampled = resampled.dropna()
+    
+    if len(resampled) == 0:
+        return None
+    
+    # Calculate statistics
+    range_stats = resampled['range'].describe(percentiles=[.25, .5, .75])
+    
+    # Calculate ATR (Average True Range)
+    atr_window = min(14, len(resampled))
+    if atr_window > 0 and not resampled['true_range'].isna().all():
+        atr = resampled['true_range'].rolling(window=atr_window).mean().iloc[-1]
+        if pd.isna(atr) and len(resampled) >= 1:
+            atr = resampled['true_range'].mean()
+    else:
+        atr = 0
+    
+    # Calculate additional metrics
+    volatility = resampled['range'].std()
+    cv = volatility / range_stats['mean'] if range_stats['mean'] > 0 else 0
+    
+    # Add VIX data if available for daily analysis
+    if timeframe == 'daily' and vix_data is not None:
+        resampled = resampled.join(vix_data, how='left')
+    
+    return {
+        'stats': range_stats,
+        'atr': atr if not pd.isna(atr) else 0,
+        'volatility': volatility if not pd.isna(volatility) else 0,
+        'coefficient_variation': cv,
+        'data': resampled,
+        'atr_window': atr_window
+    }
 
 def calculate_probability_distribution(historical_data, current_price, timeframe='daily', lookback_days=14):
     """Calculate probability distribution for price movements"""
@@ -293,90 +371,6 @@ def generate_strike_recommendations(current_price, prob_dist, target_prob=0.10, 
     recommendations.sort(key=lambda x: x['safety_score'], reverse=True)
     
     return recommendations
-
-def calculate_volatility_metrics(data, timeframe='hourly', vix_data=None):
-    """Calculate volatility metrics for given timeframe"""
-    if data is None or data.empty:
-        return None
-    
-    # Calculate ranges and true range
-    data = data.copy()
-    data['range'] = data['High'] - data['Low']
-    
-    # Calculate true range for better ATR
-    true_range = calculate_true_range(data)
-    if true_range is not None:
-        data['true_range'] = true_range
-    else:
-        data['true_range'] = data['range']  # Fallback to simple range
-    
-    # Resample based on timeframe
-    if timeframe == 'daily':
-        resampled = data.resample('D').agg({
-            'High': 'max', 
-            'Low': 'min', 
-            'Close': 'last', 
-            'Volume': 'sum',
-            'range': 'max',  # Use max range within the day
-            'true_range': 'max'  # Use max true range within the day
-        })
-        resampled['range'] = resampled['High'] - resampled['Low']
-        # Recalculate true range for daily data
-        daily_tr = calculate_true_range(resampled)
-        if daily_tr is not None:
-            resampled['true_range'] = daily_tr
-    elif timeframe == 'weekly':
-        resampled = data.resample('W').agg({
-            'High': 'max', 
-            'Low': 'min', 
-            'Close': 'last', 
-            'Volume': 'sum',
-            'range': 'max',
-            'true_range': 'max'
-        })
-        resampled['range'] = resampled['High'] - resampled['Low']
-        # Recalculate true range for weekly data
-        weekly_tr = calculate_true_range(resampled)
-        if weekly_tr is not None:
-            resampled['true_range'] = weekly_tr
-    else:  # hourly
-        resampled = data
-    
-    # Remove any rows with NaN values
-    resampled = resampled.dropna()
-    
-    if len(resampled) == 0:
-        return None
-    
-    # Calculate statistics
-    range_stats = resampled['range'].describe(percentiles=[.25, .5, .75])
-    
-    # Calculate ATR (Average True Range) - more accurate
-    atr_window = min(14, len(resampled))
-    if atr_window > 0 and not resampled['true_range'].isna().all():
-        atr = resampled['true_range'].rolling(window=atr_window).mean().iloc[-1]
-        if pd.isna(atr) and len(resampled) >= 1:
-            atr = resampled['true_range'].mean()  # Fallback to simple mean
-    else:
-        atr = 0
-    
-    # Calculate additional metrics
-    volatility = resampled['range'].std()
-    cv = volatility / range_stats['mean'] if range_stats['mean'] > 0 else 0
-    
-    # Add VIX data if available for daily analysis
-    if timeframe == 'daily' and vix_data is not None:
-        # Align VIX data with stock data
-        resampled = resampled.join(vix_data, how='left')
-    
-    return {
-        'stats': range_stats,
-        'atr': atr if not pd.isna(atr) else 0,
-        'volatility': volatility if not pd.isna(volatility) else 0,
-        'coefficient_variation': cv,
-        'data': resampled,
-        'atr_window': atr_window
-    }
 
 def create_price_chart(data, ticker, timeframe, show_vix=False):
     """Create interactive price chart with ranges and VIX overlay"""
@@ -611,10 +605,8 @@ def main():
     # Date selection
     st.sidebar.subheader("Date Range Selection")
     
-    min_date = date.today() - timedelta(days=365*2)  # 2 years ago
+    min_date = date.today() - timedelta(days=365*2)
     max_date = date.today()
-    
-    # Default to 90 days
     default_start = date.today() - timedelta(days=90)
     
     start_date = st.sidebar.date_input(
@@ -644,7 +636,7 @@ def main():
     include_hourly = st.sidebar.checkbox("Include Hourly Analysis", value=True)
     include_daily = st.sidebar.checkbox("Include Daily Analysis", value=True)
     include_weekly = st.sidebar.checkbox("Include Weekly Analysis", value=True)
-    include_vix = st.sidebar.checkbox("Include VIX Analysis", value=True, help="Add VIX market condition analysis")
+    include_vix = st.sidebar.checkbox("Include VIX Analysis", value=True)
     
     # Hour selection for hourly data
     if include_hourly:
@@ -715,7 +707,7 @@ def main():
         progress_bar.empty()
         status_text.empty()
         
-        # Store results in session state so they persist
+        # Store results in session state
         st.session_state.results = results
         st.session_state.vix_data = vix_data
         st.session_state.include_vix = include_vix
@@ -725,14 +717,12 @@ def main():
     results = getattr(st.session_state, 'results', {})
     vix_data = getattr(st.session_state, 'vix_data', None)
     include_vix = getattr(st.session_state, 'include_vix', False)
-    selected_tickers = getattr(st.session_state, 'selected_tickers', selected_tickers)
+    session_tickers = getattr(st.session_state, 'selected_tickers', selected_tickers)
     
-    # Main content area - always show this
+    # CREATE TABS - ALWAYS AVAILABLE
     if results:
-        # Display results
+        # Full analysis with all tabs
         st.header("📈 Enhanced Analysis Results")
-        
-        # Create tabs for different views
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📊 Summary", 
             "📈 Price Charts", 
@@ -769,7 +759,7 @@ def main():
             
             # Create summary table
             summary_data = []
-            for ticker in selected_tickers:
+            for ticker in session_tickers:
                 row = {'Ticker': ticker}
                 for tf in ['hourly', 'daily', 'weekly']:
                     if tf in results[ticker] and results[ticker][tf]:
@@ -793,7 +783,7 @@ def main():
             st.subheader("📈 Interactive Price Charts with Enhanced ATR")
             
             # Chart selection
-            chart_ticker = st.selectbox("Select ticker for detailed chart:", selected_tickers)
+            chart_ticker = st.selectbox("Select ticker for detailed chart:", session_tickers)
             chart_timeframe = st.selectbox(
                 "Select timeframe:",
                 [tf for tf in ['hourly', 'daily', 'weekly'] if tf in results[chart_ticker] and results[chart_ticker][tf]]
@@ -820,7 +810,7 @@ def main():
         with tab3:
             st.subheader("🔍 Detailed Statistical Analysis")
             
-            for ticker in selected_tickers:
+            for ticker in session_tickers:
                 st.write(f"### {ticker}")
                 
                 valid_timeframes = [tf for tf in ['hourly', 'daily', 'weekly'] if tf in results[ticker] and results[ticker][tf]]
@@ -852,7 +842,7 @@ def main():
         with tab4:
             st.subheader("⚖️ Cross-Ticker Comparison")
             
-            if len(selected_tickers) > 1:
+            if len(session_tickers) > 1:
                 # ATR comparison
                 atr_fig = create_comparison_chart(results, 'atr')
                 st.plotly_chart(atr_fig, use_container_width=True)
@@ -866,7 +856,7 @@ def main():
                 
                 # Get daily data for correlation
                 correlation_data = {}
-                for ticker in selected_tickers:
+                for ticker in session_tickers:
                     if 'daily' in results[ticker] and results[ticker]['daily']:
                         correlation_data[ticker] = results[ticker]['daily']['data']['range']
                 
@@ -956,17 +946,323 @@ def main():
                 
             else:
                 st.info("VIX analysis not available. Enable 'Include VIX Analysis' in the sidebar to see market condition analysis.")
-    else:
-        # Show just the Options Strategy when no analysis has been run
-        st.header("📊 Enhanced Stock Volatility Analyzer with Options Strategy")
-        st.info("ℹ️ Run the Enhanced Analysis first to see all features, or use Options Strategy below.")
         
-        # Create just the Options Strategy container
-        tab6 = st.container()
+        with tab6:
+            st.subheader("🎯 Enhanced Options Trading Strategy")
+            
+            # Strategy configuration
+            st.markdown("### 📅 Trade Configuration")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                strategy_ticker = st.selectbox(
+                    "Select ticker for options strategy:",
+                    session_tickers,
+                    help="Choose the ticker you want to trade options on"
+                )
+                
+                trade_date = st.date_input(
+                    "Select trade date:",
+                    value=date.today(),
+                    min_value=date.today() - timedelta(days=7),
+                    max_value=date.today() + timedelta(days=30),
+                    help="Date when you plan to enter the trade"
+                )
+            
+            with col2:
+                strategy_timeframe = st.selectbox(
+                    "Options expiry timeframe:",
+                    ['daily', 'weekly'],
+                    help="Daily = same day expiry, Weekly = end of week expiry"
+                )
+                
+                target_probability = st.slider(
+                    "Target probability threshold (%):",
+                    min_value=1,
+                    max_value=20,
+                    value=10,
+                    help="Maximum acceptable probability of strike being hit"
+                ) / 100
+            
+            # Enhanced 95% Probability Range Display
+            if strategy_ticker in results and 'daily' in results[strategy_ticker] and results[strategy_ticker]['daily'] is not None:
+                try:
+                    current_price = get_current_price(strategy_ticker)
+                    daily_data = results[strategy_ticker]['daily']['data']
+                    atr = results[strategy_ticker]['daily']['atr']
+                    
+                    if current_price and atr > 0:
+                        # Calculate 95% probability range using Z = 1.96
+                        z_score_95 = 1.96
+                        upper_bound = current_price + (z_score_95 * atr)
+                        lower_bound = current_price - (z_score_95 * atr)
+                        range_width = upper_bound - lower_bound
+                        
+                        st.markdown("### 📊 95% Probability Price Range")
+                        st.markdown('<div class="metric-container">', unsafe_allow_html=True)
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Current Price", f"${current_price:.2f}")
+                        with col2:
+                            st.metric("Lower Bound (95%)", f"${lower_bound:.2f}", f"-${current_price - lower_bound:.2f}")
+                        with col3:
+                            st.metric("Upper Bound (95%)", f"${upper_bound:.2f}", f"+${upper_bound - current_price:.2f}")
+                        with col4:
+                            st.metric("Range Width", f"${range_width:.2f}")
+                        
+                        st.markdown('</div>', unsafe_allow_html=True)
+                        
+                        # Visual representation
+                        st.info(f"""
+                        **95% Confidence Range**: There is a 95% probability that {strategy_ticker} will trade between 
+                        **${lower_bound:.2f}** and **${upper_bound:.2f}** based on current ATR of ${atr:.2f}.
+                        
+                        - **2.5% chance** price goes below ${lower_bound:.2f}
+                        - **2.5% chance** price goes above ${upper_bound:.2f}
+                        - **Range represents ±{z_score_95} standard deviations** from current price
+                        """)
+                        
+                except Exception as e:
+                    st.warning(f"Could not calculate 95% range: {str(e)}")
+            
+            # Custom strike testing
+            st.markdown("### 🎯 Custom Strike Analysis")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                custom_strikes_input = st.text_input(
+                    "Enter custom strikes (comma-separated):",
+                    placeholder="e.g., 580, 575, 570",
+                    help="Enter specific strike prices you want to analyze"
+                )
+            
+            with col2:
+                num_recommendations = st.slider(
+                    "Number of strike recommendations:",
+                    min_value=3,
+                    max_value=10,
+                    value=5,
+                    help="How many strike prices to recommend"
+                )
+            
+            if st.button("🚀 Generate Enhanced Options Strategy", type="primary"):
+                try:
+                    st.info("🔄 Generating enhanced options strategy with 95% probability analysis...")
+                    
+                    # Get current price
+                    with st.spinner("Fetching current price..."):
+                        current_price = get_current_price(strategy_ticker)
+                    
+                    if current_price is None:
+                        st.error(f"❌ Could not fetch current price for {strategy_ticker}")
+                        return
+                    
+                    st.success(f"✅ Current price fetched: ${current_price:.2f}")
+                    
+                    # Enhanced analysis with 95% probability ranges
+                    if strategy_ticker in results and 'daily' in results[strategy_ticker] and results[strategy_ticker]['daily'] is not None:
+                        daily_data = results[strategy_ticker]['daily']['data']
+                        atr = results[strategy_ticker]['daily']['atr']
+                        
+                        # Calculate 95% probability range
+                        z_score_95 = 1.96
+                        upper_bound_95 = current_price + (z_score_95 * atr)
+                        lower_bound_95 = current_price - (z_score_95 * atr)
+                        
+                        # Calculate 90% probability range for comparison
+                        z_score_90 = 1.645
+                        upper_bound_90 = current_price + (z_score_90 * atr)
+                        lower_bound_90 = current_price - (z_score_90 * atr)
+                        
+                        # Calculate 99% probability range for ultra-conservative
+                        z_score_99 = 2.576
+                        upper_bound_99 = current_price + (z_score_99 * atr)
+                        lower_bound_99 = current_price - (z_score_99 * atr)
+                        
+                        st.markdown("### 📈 Enhanced Probability Analysis")
+                        
+                        # Display multiple confidence levels
+                        conf_data = []
+                        for conf_level, z_score, upper, lower in [
+                            ("90%", z_score_90, upper_bound_90, lower_bound_90),
+                            ("95%", z_score_95, upper_bound_95, lower_bound_95),
+                            ("99%", z_score_99, upper_bound_99, lower_bound_99)
+                        ]:
+                            conf_data.append({
+                                'Confidence Level': conf_level,
+                                'Lower Bound': f"${lower:.2f}",
+                                'Upper Bound': f"${upper:.2f}",
+                                'Range Width': f"${upper - lower:.2f}",
+                                'PUT Strike Zone': f"Below ${lower:.2f}",
+                                'Risk Level': 'Conservative' if conf_level == '99%' else 'Moderate' if conf_level == '95%' else 'Aggressive'
+                            })
+                        
+                        conf_df = pd.DataFrame(conf_data)
+                        st.dataframe(conf_df, use_container_width=True)
+                        
+                        # VIX Assessment
+                        trade_approved = True
+                        if include_vix and vix_data is not None and not vix_data.empty:
+                            try:
+                                latest_vix = vix_data['VIX_Close'].iloc[-1]
+                                can_trade, trade_reason = should_trade(latest_vix)
+                                condition, color_class, icon = get_vix_condition(latest_vix)
+                                
+                                st.markdown("### 🌡️ Market Condition Assessment")
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.metric("Current VIX", f"{latest_vix:.2f}")
+                                    st.markdown(f'<div class="{color_class}">{icon} {condition}</div>', unsafe_allow_html=True)
+                                with col2:
+                                    if can_trade:
+                                        st.success(f"✅ **TRADE APPROVED**: {trade_reason}")
+                                    else:
+                                        st.error(f"❌ **TRADE NOT RECOMMENDED**: {trade_reason}")
+                                        trade_approved = False
+                            except Exception as e:
+                                st.warning(f"⚠️ VIX assessment error: {str(e)}")
+                        
+                        # Enhanced Strike Recommendations based on 95% probability
+                        st.markdown("### 🎯 Enhanced PUT Strike Recommendations")
+                        
+                        # Calculate probability distribution for more accurate analysis
+                        lookback_days = 10 if strategy_timeframe == 'weekly' else 14
+                        prob_dist = calculate_probability_distribution(
+                            daily_data, current_price, strategy_timeframe, lookback_days
+                        )
+                        
+                        if prob_dist:
+                            # Generate recommendations using both ATR-based and probability-based methods
+                            recommendations = generate_strike_recommendations(
+                                current_price, prob_dist, target_probability, strategy_timeframe, num_recommendations
+                            )
+                            
+                            if recommendations:
+                                # Enhanced recommendations table with 95% probability zones
+                                enhanced_rec_data = []
+                                for rec in recommendations:
+                                    # Determine which probability zone the strike falls into
+                                    strike_price = rec['strike']
+                                    if strike_price >= lower_bound_99:
+                                        prob_zone = "Ultra Safe (>99%)"
+                                        zone_color = "🟢"
+                                    elif strike_price >= lower_bound_95:
+                                        prob_zone = "Very Safe (95-99%)"
+                                        zone_color = "🟢"
+                                    elif strike_price >= lower_bound_90:
+                                        prob_zone = "Safe (90-95%)"
+                                        zone_color = "🟡"
+                                    else:
+                                        prob_zone = "Risky (<90%)"
+                                        zone_color = "🔴"
+                                    
+                                    safety_color = "🟢" if rec['safety_score'] > 0.95 else "🟡" if rec['safety_score'] > 0.90 else "🔴"
+                                    
+                                    enhanced_rec_data.append({
+                                        'Strike': f"${rec['strike']:.2f}",
+                                        'Distance': f"${rec['distance_from_current']:.2f}",
+                                        'Distance %': f"{rec['distance_pct']:.1f}%",
+                                        'Prob Below': f"{rec['prob_below']:.1%}",
+                                        'Safety Score': f"{safety_color} {rec['safety_score']:.1%}",
+                                        'Probability Zone': f"{zone_color} {prob_zone}",
+                                        'Recommendation': 'RECOMMENDED' if rec['prob_below'] <= target_probability else 'RISKY'
+                                    })
+                                
+                                enhanced_rec_df = pd.DataFrame(enhanced_rec_data)
+                                st.dataframe(enhanced_rec_df, use_container_width=True)
+                                
+                                # Best recommendation with enhanced analysis
+                                best_rec = recommendations[0]
+                                st.markdown('<div class="strike-recommend">', unsafe_allow_html=True)
+                                st.markdown(f"""
+                                ### 🏆 ENHANCED RECOMMENDATION: ${best_rec['strike']:.2f} PUT
+                                
+                                **Statistical Analysis:**
+                                - **Current Price**: ${current_price:.2f}
+                                - **Strike Distance**: ${best_rec['distance_from_current']:.2f} ({best_rec['distance_pct']:.1f}%)
+                                - **Probability of Hit**: {best_rec['prob_below']:.1%}
+                                - **Safety Score**: {best_rec['safety_score']:.1%}
+                                
+                                **95% Probability Analysis:**
+                                - **95% Lower Bound**: ${lower_bound_95:.2f}
+                                - **Strike vs 95% Bound**: {"✅ SAFE" if best_rec['strike'] >= lower_bound_95 else "⚠️ RISKY"}
+                                - **ATR-Based Range**: ±${z_score_95 * atr:.2f}
+                                
+                                **Risk Assessment:**
+                                - **Timeframe**: {strategy_timeframe.title()}
+                                - **Market Condition**: {condition if 'condition' in locals() else 'VIX not available'}
+                                - **Overall Risk**: {"LOW" if best_rec['strike'] >= lower_bound_95 and trade_approved else "MEDIUM" if best_rec['strike'] >= lower_bound_90 else "HIGH"}
+                                """)
+                                st.markdown('</div>', unsafe_allow_html=True)
+                                
+                                # Probability visualization
+                                try:
+                                    prob_fig = create_probability_chart(recommendations, current_price, strategy_ticker)
+                                    if prob_fig:
+                                        st.plotly_chart(prob_fig, use_container_width=True)
+                                except Exception as e:
+                                    st.warning(f"Chart generation failed: {str(e)}")
+                        
+                        # Custom strikes analysis with 95% probability assessment
+                        if custom_strikes_input:
+                            try:
+                                custom_strikes = [float(x.strip()) for x in custom_strikes_input.split(',')]
+                                st.markdown("### 🔍 Enhanced Custom Strike Analysis")
+                                
+                                custom_enhanced_data = []
+                                for strike in custom_strikes:
+                                    distance = current_price - strike
+                                    distance_pct = (distance / current_price) * 100
+                                    
+                                    # Assess against 95% probability zones
+                                    if strike >= lower_bound_99:
+                                        prob_assessment = "🟢 Ultra Safe (>99%)"
+                                        risk_level = "VERY LOW"
+                                    elif strike >= lower_bound_95:
+                                        prob_assessment = "🟢 Very Safe (95-99%)"
+                                        risk_level = "LOW"
+                                    elif strike >= lower_bound_90:
+                                        prob_assessment = "🟡 Safe (90-95%)"
+                                        risk_level = "MEDIUM"
+                                    else:
+                                        prob_assessment = "🔴 Risky (<90%)"
+                                        risk_level = "HIGH"
+                                    
+                                    custom_enhanced_data.append({
+                                        'Strike': f"${strike:.2f}",
+                                        'Distance': f"${distance:.2f}",
+                                        'Distance %': f"{distance_pct:.1f}%",
+                                        'vs 95% Bound': f"${strike - lower_bound_95:.2f}",
+                                        'Probability Zone': prob_assessment,
+                                        'Risk Level': risk_level
+                                    })
+                                
+                                custom_enhanced_df = pd.DataFrame(custom_enhanced_data)
+                                st.dataframe(custom_enhanced_df, use_container_width=True)
+                                
+                            except ValueError:
+                                st.error("❌ Invalid strike format. Please use comma-separated numbers")
+                        
+                        st.success("✅ Enhanced options strategy analysis complete!")
+                        
+                    else:
+                        st.error(f"❌ No daily data available for {strategy_ticker}")
+                        st.error("Please ensure daily analysis was included in the main analysis")
+                
+                except Exception as e:
+                    st.error(f"❌ Unexpected error: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
     
-    # Always show Options Strategy (either in tab6 or container)
-    with tab6:
-        st.subheader("🎯 Options Trading Strategy Recommendations")
+    else:
+        # No analysis run yet - show standalone Options Strategy
+        st.header("📊 Enhanced Stock Volatility Analyzer with Options Strategy")
+        st.info("ℹ️ Run the Enhanced Analysis first to see all features, or use Basic Options Strategy below.")
+        
+        # Create standalone Options Strategy container
+        st.subheader("🎯 Basic Options Trading Strategy")
         
         # Strategy configuration
         st.markdown("### 📅 Trade Configuration")
@@ -976,8 +1272,9 @@ def main():
         with col1:
             strategy_ticker = st.selectbox(
                 "Select ticker for options strategy:",
-                selected_tickers,
-                help="Choose the ticker you want to trade options on"
+                selected_tickers if selected_tickers else ['SPY'],
+                help="Choose the ticker you want to trade options on",
+                key="standalone_ticker"
             )
             
             trade_date = st.date_input(
@@ -985,14 +1282,16 @@ def main():
                 value=date.today(),
                 min_value=date.today() - timedelta(days=7),
                 max_value=date.today() + timedelta(days=30),
-                help="Date when you plan to enter the trade"
+                help="Date when you plan to enter the trade",
+                key="standalone_date"
             )
         
         with col2:
             strategy_timeframe = st.selectbox(
                 "Options expiry timeframe:",
                 ['daily', 'weekly'],
-                help="Daily = same day expiry, Weekly = end of week expiry"
+                help="Daily = same day expiry, Weekly = end of week expiry",
+                key="standalone_timeframe"
             )
             
             target_probability = st.slider(
@@ -1000,7 +1299,8 @@ def main():
                 min_value=1,
                 max_value=20,
                 value=10,
-                help="Maximum acceptable probability of strike being hit"
+                help="Maximum acceptable probability of strike being hit",
+                key="standalone_probability"
             ) / 100
         
         # Custom strike testing
@@ -1011,7 +1311,8 @@ def main():
             custom_strikes_input = st.text_input(
                 "Enter custom strikes (comma-separated):",
                 placeholder="e.g., 580, 575, 570",
-                help="Enter specific strike prices you want to analyze"
+                help="Enter specific strike prices you want to analyze",
+                key="standalone_strikes"
             )
         
         with col2:
@@ -1020,302 +1321,103 @@ def main():
                 min_value=3,
                 max_value=10,
                 value=5,
-                help="How many strike prices to recommend"
+                help="How many strike prices to recommend",
+                key="standalone_num_recs"
             )
         
-        if st.button("🚀 Generate Options Strategy", type="primary"):
-            # IMMEDIATE DEBUG - Show we entered the button handler
-            st.write("🔧 DEBUG: Button clicked! Starting options strategy generation...")
-            st.write(f"🔧 DEBUG: Button pressed at {datetime.now()}")
-            
+        if st.button("🚀 Generate Basic Options Strategy", type="primary", key="standalone_button"):
             try:
-                st.write("🔧 DEBUG: Entered try block successfully")
-                st.info("🔄 Generating options strategy...")
-                
-                # Debug: Check basic variables
-                st.write(f"🔧 DEBUG: strategy_ticker = {strategy_ticker}")
-                st.write(f"🔧 DEBUG: strategy_timeframe = {strategy_timeframe}")
-                st.write(f"🔧 DEBUG: target_probability = {target_probability}")
-                st.write(f"🔧 DEBUG: trade_date = {trade_date}")
-                
-                # Debug: Check if results exist
-                st.write(f"🔧 DEBUG: 'results' variable exists: {'results' in locals()}")
-                if 'results' in locals():
-                    st.write(f"🔧 DEBUG: results.keys() = {list(results.keys())}")
-                    st.write(f"🔧 DEBUG: len(results) = {len(results)}")
-                else:
-                    st.error("🔧 DEBUG: ERROR - 'results' variable not found!")
-                    st.error("🔧 This means you need to run the main analysis first!")
-                    st.stop()
-                
-                # Debug: Check if we have the required data
-                st.write(f"🔧 DEBUG: Selected ticker: {strategy_ticker}")
-                st.write(f"🔧 DEBUG: Available results keys: {list(results.keys())}")
-                
-                st.write("🔧 DEBUG: About to fetch current price...")
+                st.info("🔄 Generating basic options strategy...")
+                st.warning("⚠️ This is basic analysis. Run Enhanced Analysis for 95% probability calculations!")
                 
                 # Get current price
                 with st.spinner("Fetching current price..."):
-                    st.write("🔧 DEBUG: Inside spinner for current price...")
                     current_price = get_current_price(strategy_ticker)
-                    st.write(f"🔧 DEBUG: get_current_price returned: {current_price}")
                 
                 if current_price is None:
                     st.error(f"❌ Could not fetch current price for {strategy_ticker}")
-                    st.error("Please try again or select a different ticker")
-                    st.warning("⚠️ Try selecting a different ticker or check your internet connection")
-                    st.write("🔧 DEBUG: Exiting due to current_price = None")
                     return
                 
                 st.success(f"✅ Current price fetched: ${current_price:.2f}")
-                st.write(f"🔧 DEBUG: Successfully got current price: ${current_price:.2f}")
                 
-                st.markdown(f"### 📊 Analysis for {strategy_ticker}")
+                st.markdown(f"### 📊 Basic Analysis for {strategy_ticker}")
                 st.info(f"**Current Price**: ${current_price:.2f} | **Trade Date**: {trade_date} | **Timeframe**: {strategy_timeframe}")
                 
-                st.write("🔧 DEBUG: About to start VIX assessment...")
+                # Basic demonstration strategy
+                st.markdown("### 🎯 Basic PUT Strategy Demonstration")
                 
-                # VIX Assessment
-                trade_approved = True
-                st.write(f"🔧 DEBUG: include_vix = {'include_vix' in locals()}")
-                if 'include_vix' in locals():
-                    st.write(f"🔧 DEBUG: include_vix value = {include_vix}")
-                st.write(f"🔧 DEBUG: vix_data exists = {'vix_data' in locals()}")
-                if 'vix_data' in locals():
-                    st.write(f"🔧 DEBUG: vix_data is not None = {vix_data is not None}")
-                    if vix_data is not None:
-                        st.write(f"�� DEBUG: vix_data is not empty = {not vix_data.empty}")
+                # Calculate some basic strikes
+                strikes_below = []
+                for i in range(num_recommendations):
+                    pct_below = (i + 1) * 2  # 2%, 4%, 6%, etc.
+                    strike = current_price * (1 - pct_below/100)
+                    strikes_below.append(round(strike, 2))
                 
-                if include_vix and vix_data is not None and not vix_data.empty:
-                    try:
-                        latest_vix = vix_data['VIX_Close'].iloc[-1]
-                        can_trade, trade_reason = should_trade(latest_vix)
-                        condition, color_class, icon = get_vix_condition(latest_vix)
-                        
-                        st.markdown("### 🌡️ Market Condition Assessment")
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("Current VIX", f"{latest_vix:.2f}")
-                            st.markdown(f'<div class="{color_class}">{icon} {condition}</div>', unsafe_allow_html=True)
-                        
-                        with col2:
-                            if can_trade:
-                                st.success(f"✅ **TRADE APPROVED**: {trade_reason}")
-                            else:
-                                st.error(f"❌ **TRADE NOT RECOMMENDED**: {trade_reason}")
-                                st.warning("You can still continue with the analysis, but exercise extra caution.")
-                                trade_approved = False
-                    except Exception as e:
-                        st.warning(f"⚠️ VIX assessment error: {str(e)}")
-                        trade_approved = True
-                else:
-                    st.warning("⚠️ VIX data not available - proceeding with analysis")
-                    trade_approved = True
-                
-                # Continue with analysis regardless of VIX (but warn user)
-                if not trade_approved:
-                    st.error("⚠️ **HIGH RISK CONDITIONS DETECTED** - Use extreme caution if proceeding")
-                
-                # Get historical data for probability analysis
-                st.write(f"Debug: Checking if {strategy_ticker} in results: {strategy_ticker in results}")
-                if strategy_ticker in results:
-                    st.write(f"Debug: Available timeframes for {strategy_ticker}: {list(results[strategy_ticker].keys())}")
-                
-                if strategy_ticker in results and 'daily' in results[strategy_ticker] and results[strategy_ticker]['daily'] is not None:
-                    try:
-                        daily_data = results[strategy_ticker]['daily']['data']
-                        st.success(f"✅ Found {len(daily_data)} days of historical data")
-                        
-                        # Calculate probability distribution
-                        lookback_days = 10 if strategy_timeframe == 'weekly' else 14
-                        
-                        with st.spinner("Calculating probability distribution..."):
-                            prob_dist = calculate_probability_distribution(
-                                daily_data, current_price, strategy_timeframe, lookback_days
-                            )
-                        
-                        if prob_dist is None:
-                            st.error("❌ Insufficient data for probability analysis")
-                            st.error(f"Need at least {lookback_days} days of data for {strategy_timeframe} analysis")
-                            
-                            # Show available data info instead of stopping
-                            if strategy_ticker in results:
-                                available_timeframes = [tf for tf in results[strategy_ticker].keys() if results[strategy_ticker][tf] is not None]
-                                st.info(f"Available timeframes for {strategy_ticker}: {available_timeframes}")
-                                
-                                # Try to suggest alternatives
-                                if 'daily' in available_timeframes:
-                                    daily_data_len = len(results[strategy_ticker]['daily']['data'])
-                                    st.info(f"You have {daily_data_len} days of daily data. Try reducing the lookback period or selecting a different timeframe.")
-                                
-                            st.warning("⚠️ Cannot generate options strategy with current data. Please try:")
-                            st.markdown("""
-                            - Select a longer date range (at least 30 days)
-                            - Ensure 'Include Daily Analysis' is checked
-                            - Try a different ticker with more data
-                            """)
-                            return  # Skip to the end instead of stopping the app
-                        
-                        st.success(f"✅ Probability distribution calculated using {prob_dist['sample_size']} periods")
-                        
-                        # Display ATR and volatility info
-                        st.markdown("### 📈 Volatility Analysis")
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        with col1:
-                            st.metric("ATR", f"${prob_dist['atr']:.2f}")
-                        with col2:
-                            st.metric("ATR Std Dev", f"${prob_dist['atr_std']:.2f}")
-                        with col3:
-                            st.metric("Return Volatility", f"{prob_dist['std_return']:.2%}")
-                        with col4:
-                            st.metric("Sample Size", f"{prob_dist['sample_size']} periods")
-                        
-                        # Generate strike recommendations
-                        with st.spinner("Generating strike recommendations..."):
-                            recommendations = generate_strike_recommendations(
-                                current_price, prob_dist, target_probability, strategy_timeframe, num_recommendations
-                            )
-                        
-                        if recommendations and len(recommendations) > 0:
-                            st.success(f"✅ Generated {len(recommendations)} strike recommendations")
-                            
-                            st.markdown("### 🎯 Strike Price Recommendations")
-                            
-                            # Create recommendations table
-                            rec_data = []
-                            for rec in recommendations:
-                                safety_color = "🟢" if rec['safety_score'] > 0.95 else "🟡" if rec['safety_score'] > 0.90 else "🔴"
-                                rec_data.append({
-                                    'Strike': f"${rec['strike']:.2f}",
-                                    'Distance': f"${rec['distance_from_current']:.2f}",
-                                    'Distance %': f"{rec['distance_pct']:.1f}%",
-                                    'Prob Below': f"{rec['prob_below']:.1%}",
-                                    'Safety Score': f"{safety_color} {rec['safety_score']:.1%}",
-                                    'Recommendation': 'RECOMMENDED' if rec['prob_below'] <= target_probability else 'RISKY'
-                                })
-                            
-                            rec_df = pd.DataFrame(rec_data)
-                            st.dataframe(rec_df, use_container_width=True)
-                            
-                            # Best recommendation
-                            best_rec = recommendations[0]
-                            st.markdown('<div class="strike-recommend">', unsafe_allow_html=True)
-                            st.markdown(f"""
-                            ### 🏆 BEST RECOMMENDATION: ${best_rec['strike']:.2f}
-                            - **Distance from current**: ${best_rec['distance_from_current']:.2f} ({best_rec['distance_pct']:.1f}%)
-                            - **Probability of being hit**: {best_rec['prob_below']:.1%}
-                            - **Safety score**: {best_rec['safety_score']:.1%}
-                            """)
-                            st.markdown('</div>', unsafe_allow_html=True)
-                            
-                            # Probability visualization
-                            try:
-                                prob_fig = create_probability_chart(recommendations, current_price, strategy_ticker)
-                                if prob_fig:
-                                    st.plotly_chart(prob_fig, use_container_width=True)
-                            except Exception as e:
-                                st.warning(f"Chart generation failed: {str(e)}")
-                            
-                            # Custom strikes analysis
-                            if custom_strikes_input:
-                                try:
-                                    custom_strikes = [float(x.strip()) for x in custom_strikes_input.split(',')]
-                                    st.info(f"Analyzing custom strikes: {custom_strikes}")
-                                    
-                                    custom_probs = calculate_strike_probabilities(prob_dist, custom_strikes, strategy_timeframe)
-                                    
-                                    if custom_probs:
-                                        st.markdown("### 🔍 Custom Strike Analysis")
-                                        
-                                        custom_data = []
-                                        for strike, prob_info in custom_probs.items():
-                                            distance = strike - current_price
-                                            distance_pct = (distance / current_price) * 100
-                                            
-                                            custom_data.append({
-                                                'Strike': f"${strike:.2f}",
-                                                'Distance': f"${distance:.2f}",
-                                                'Distance %': f"{distance_pct:.1f}%",
-                                                'Prob Below': f"{prob_info['prob_below']:.1%}",
-                                                'Prob Above': f"{prob_info['prob_above']:.1%}",
-                                                'Risk Assessment': 'LOW' if prob_info['prob_below'] <= target_probability else 'HIGH'
-                                            })
-                                        
-                                        custom_df = pd.DataFrame(custom_data)
-                                        st.dataframe(custom_df, use_container_width=True)
-                                
-                                except ValueError:
-                                    st.error("❌ Invalid strike format. Please use comma-separated numbers (e.g., 580, 575, 570)")
-                                except Exception as e:
-                                    st.error(f"❌ Custom strikes analysis failed: {str(e)}")
-                            
-                            # Strategy summary
-                            st.markdown("### 📋 PUT Spread Strategy Summary")
-                            
-                            try:
-                                protection_strike = best_rec['strike'] - (prob_dist['atr'] * 0.5)
-                                
-                                st.markdown('<div class="trade-recommend">', unsafe_allow_html=True)
-                                st.markdown(f"""
-                                **Recommended PUT Spread Strategy for {strategy_ticker}:**
-                                
-                                🎯 **Short PUT**: ${best_rec['strike']:.2f} (Collect premium)
-                                🛡️ **Long PUT**: ${protection_strike:.2f} (Protection)
-                                
-                                **Risk Assessment:**
-                                - Probability of short strike being hit: {best_rec['prob_below']:.1%}
-                                - Expected max profit: Premium collected
-                                - Expected max loss: Strike spread - Premium
-                                - Break-even: Short strike - Premium collected
-                                
-                                **Market Conditions:**
-                                - Current Price: ${current_price:.2f}
-                                - ATR: ${prob_dist['atr']:.2f}
-                                - Timeframe: {strategy_timeframe.title()}
-                                {"- VIX Level: " + f"{latest_vix:.2f} ({condition})" if 'latest_vix' in locals() else "- VIX: Not available"}
-                                """)
-                                st.markdown('</div>', unsafe_allow_html=True)
-                            except Exception as e:
-                                st.error(f"❌ Strategy summary generation failed: {str(e)}")
-                            
-                        else:
-                            st.error("❌ No valid strike recommendations could be generated")
-                            st.error("This might be due to insufficient data or extreme market conditions")
-                        
-                    except Exception as e:
-                        st.write("🔧 DEBUG: CAUGHT EXCEPTION!")
-                        st.write(f"🔧 DEBUG: Exception type: {type(e).__name__}")
-                        st.write(f"🔧 DEBUG: Exception message: {str(e)}")
-                        st.error(f"❌ Unexpected error: {str(e)}")
-                        st.error("Please try again or contact support")
-                        # Show the full traceback for debugging
-                        import traceback
-                        st.write("🔧 DEBUG: Full traceback:")
-                        st.code(traceback.format_exc())
-                        
-                else:
-                    st.write("🔧 DEBUG: No daily data available branch")
-                    st.error(f"❌ No daily data available for {strategy_ticker}")
-                    st.error("Please ensure you've run the main analysis first and selected 'Include Daily Analysis'")
+                st.markdown("### 📋 Suggested PUT Strike Prices")
+                strike_data = []
+                for i, strike in enumerate(strikes_below):
+                    distance = current_price - strike
+                    distance_pct = (distance / current_price) * 100
                     
-                    # Show what data is available
-                    if strategy_ticker in results:
-                        available_timeframes = [tf for tf in results[strategy_ticker].keys() if results[strategy_ticker][tf] is not None]
-                        st.info(f"Available timeframes: {available_timeframes}")
-                    else:
-                        st.info("No data found for this ticker. Please run the main analysis first.")
-            
+                    strike_data.append({
+                        'Rank': i + 1,
+                        'Strike Price': f"${strike:.2f}",
+                        'Distance': f"${distance:.2f}",
+                        'Distance %': f"{distance_pct:.1f}%",
+                        'Recommendation': 'CONSERVATIVE' if distance_pct > 5 else 'AGGRESSIVE'
+                    })
+                
+                strike_df = pd.DataFrame(strike_data)
+                st.dataframe(strike_df, use_container_width=True)
+                
+                # Best recommendation
+                best_strike = strikes_below[0]
+                st.markdown('<div class="strike-recommend">', unsafe_allow_html=True)
+                st.markdown(f"""
+                ### 🏆 BASIC RECOMMENDATION: ${best_strike:.2f} PUT
+                - **Current Price**: ${current_price:.2f}
+                - **Strike Distance**: ${current_price - best_strike:.2f} ({((current_price - best_strike)/current_price)*100:.1f}%)
+                - **Strategy**: Sell PUT at ${best_strike:.2f}
+                - **Timeframe**: {strategy_timeframe.title()}
+                
+                ⚠️ **Note**: This is a basic recommendation. For 95% probability analysis and VIX conditions, run Enhanced Analysis first.
+                """)
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                # Custom strikes analysis
+                if custom_strikes_input:
+                    try:
+                        custom_strikes = [float(x.strip()) for x in custom_strikes_input.split(',')]
+                        st.info(f"Analyzing custom strikes: {custom_strikes}")
+                        
+                        st.markdown("### 🔍 Custom Strike Analysis")
+                        
+                        custom_data = []
+                        for strike in custom_strikes:
+                            distance = current_price - strike
+                            distance_pct = (distance / current_price) * 100
+                            
+                            custom_data.append({
+                                'Strike': f"${strike:.2f}",
+                                'Distance': f"${distance:.2f}",
+                                'Distance %': f"{distance_pct:.1f}%",
+                                'Risk Level': 'LOW' if distance_pct > 5 else 'MEDIUM' if distance_pct > 2 else 'HIGH'
+                            })
+                        
+                        custom_df = pd.DataFrame(custom_data)
+                        st.dataframe(custom_df, use_container_width=True)
+                    
+                    except ValueError:
+                        st.error("❌ Invalid strike format. Please use comma-separated numbers (e.g., 580, 575, 570)")
+                    except Exception as e:
+                        st.error(f"❌ Custom strikes analysis failed: {str(e)}")
+                
+                st.success("✅ Basic options strategy analysis complete!")
+                st.info("💡 Run the Enhanced Analysis first for 95% probability calculations, VIX analysis, and all advanced features!")
+                
             except Exception as e:
-                st.write("🔧 DEBUG: CAUGHT EXCEPTION!")
-                st.write(f"🔧 DEBUG: Exception type: {type(e).__name__}")
-                st.write(f"🔧 DEBUG: Exception message: {str(e)}")
                 st.error(f"❌ Unexpected error: {str(e)}")
-                st.error("Please try again or contact support")
-                # Show the full traceback for debugging
                 import traceback
-                st.write("🔧 DEBUG: Full traceback:")
                 st.code(traceback.format_exc())
 
 if __name__ == "__main__":
