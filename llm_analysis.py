@@ -365,6 +365,55 @@ Provide a brief 3-4 sentence market summary focusing on:
         prompt = self.create_market_summary_prompt(ticker_results, vix_data)
         return self.generate_analysis(prompt, max_tokens=300)
 
+    def generate_custom_analysis(self, prompt):
+        """
+        Generate custom analysis using provided prompt
+        
+        Args:
+            prompt: Custom analysis prompt
+            
+        Returns:
+            Dictionary with analysis results
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are a professional financial analyst specializing in options trading, 
+                        volatility analysis, and market conditions. Provide clear, concise, and actionable analysis 
+                        based on the data provided. Use specific numbers and be authoritative in your recommendations."""
+                    },
+                    {
+                        "role": "user", 
+                        "content": prompt
+                    }
+                ],
+                max_tokens=800,
+                temperature=0.3
+            )
+            
+            analysis_text = response.choices[0].message.content.strip()
+            
+            return {
+                'success': True,
+                'analysis': analysis_text,
+                'tokens_used': response.usage.total_tokens,
+                'model': self.model,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'analysis': None,
+                'tokens_used': 0,
+                'model': self.model,
+                'timestamp': datetime.now().isoformat()
+            }
+
 # Utility functions for Streamlit integration
 def get_llm_analyzer() -> Optional[LLMAnalyzer]:
     """

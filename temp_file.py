@@ -1573,11 +1573,13 @@ def main():
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        total_operations = len(selected_tickers) * sum([include_hourly, include_daily, include_weekly])
+        # Calculate total operations (volatility + options + put spread for each ticker)
+        total_operations = len(selected_tickers) * sum([include_hourly, include_daily, include_weekly]) + len(selected_tickers) * 2  # +2 for options and put spread
         current_operation = 0
         
+        # === STEP 1: VOLATILITY ANALYSIS ===
         for ticker in selected_tickers:
-            status_text.text(f"Analyzing {ticker}...")
+            status_text.text(f"Analyzing volatility for {ticker}...")
             results[ticker] = {}
             
             # Fetch data for different timeframes
@@ -1606,14 +1608,131 @@ def main():
                 else:
                     results[ticker][tf_name] = None
         
+        # === STEP 2: OPTIONS STRATEGY ANALYSIS (DEFAULT PARAMETERS) ===
+        status_text.text("Running Options Strategy Analysis...")
+        options_analysis_results = {}
+        
+        for ticker in selected_tickers:
+            current_operation += 1
+            progress_bar.progress(current_operation / total_operations)
+            
+            try:
+                # Get current price
+                current_price = get_current_price(ticker)
+                if current_price and ticker in results and 'daily' in results[ticker] and results[ticker]['daily'] is not None:
+                    # Use default parameters
+                    strategy_timeframe = 'daily'
+                    target_probability = 0.10  # 10%
+                    
+                    # Get analysis data
+                    analysis_data = results[ticker]['daily']['data']
+                    atr = results[ticker]['daily']['atr']
+                    
+                    # Calculate probability distribution
+                    prob_dist = calculate_probability_distribution(analysis_data, current_price, strategy_timeframe, 14)
+                    
+                    if prob_dist:
+                        # Generate recommendations
+                        recommendations = generate_strike_recommendations(current_price, prob_dist, target_probability, strategy_timeframe, 5)
+                        
+                        if recommendations:
+                            # Calculate 95% probability range
+                            z_score_95 = 1.96
+                            upper_bound_95 = current_price + (z_score_95 * atr)
+                            lower_bound_95 = current_price - (z_score_95 * atr)
+                            
+                            # Store comprehensive options analysis
+                            options_analysis_results[ticker] = {
+                                'current_price': current_price,
+                                'strategy_timeframe': strategy_timeframe,
+                                'target_probability': target_probability,
+                                'recommendations': recommendations,
+                                'best_recommendation': recommendations[0],
+                                'probability_bounds': {
+                                    'upper_95': upper_bound_95,
+                                    'lower_95': lower_bound_95,
+                                    'range_width': upper_bound_95 - lower_bound_95
+                                },
+                                'atr': atr,
+                                'analysis_data': analysis_data,
+                                'prob_dist': prob_dist,
+                                'timestamp': datetime.now().isoformat()
+                            }
+            except Exception as e:
+                st.sidebar.warning(f"Options analysis failed for {ticker}: {str(e)}")
+        
+        # === STEP 3: PUT SPREAD ANALYSIS (DEFAULT PARAMETERS) ===
+        status_text.text("Running Put Spread Analysis...")
+        put_spread_results = {}
+        
+        for ticker in selected_tickers:
+            current_operation += 1
+            progress_bar.progress(current_operation / total_operations)
+            
+            try:
+                if PUT_SPREAD_AVAILABLE:
+                    # Get current price
+                    current_price = get_current_price(ticker)
+                    if current_price and ticker in results and 'daily' in results[ticker]:
+                        # Use default parameters
+                        spread_expiry = get_same_day_expiry()  # Default to same day
+                        pot_levels = [0.20, 0.10, 0.05, 0.02, 0.01]  # Standard levels
+                        atr_value = results[ticker]['daily']['atr'] if results[ticker]['daily'] else None
+                        
+                        # Import and run analysis
+                        try:
+                            from put_spread_analysis import PutSpreadAnalyzer
+                            spread_analyzer = PutSpreadAnalyzer()
+                            
+                            # Run analysis
+                            spread_analysis = spread_analyzer.analyze_put_spread_scenarios(
+                                ticker=ticker,
+                                current_price=current_price,
+                                expiry_date=spread_expiry,
+                                atr=atr_value,
+                                target_pot_levels=pot_levels
+                            )
+                            
+                            if spread_analysis and spread_analysis['scenarios']:
+                                put_spread_results[ticker] = {
+                                    'analysis': spread_analysis,
+                                    'expiry_date': spread_expiry,
+                                    'pot_levels': pot_levels,
+                                    'current_price': current_price,
+                                    'atr_value': atr_value,
+                                    'timestamp': datetime.now().isoformat()
+                                }
+                        except Exception as e:
+                            st.sidebar.warning(f"Put spread module error for {ticker}: {str(e)}")
+            except Exception as e:
+                st.sidebar.warning(f"Put spread analysis failed for {ticker}: {str(e)}")
+        
         progress_bar.empty()
         status_text.empty()
         
-        # Store results in session state
+        # Store ALL results in session state
         st.session_state.results = results
         st.session_state.vix_data = vix_data
         st.session_state.include_vix = include_vix
         st.session_state.selected_tickers = selected_tickers
+        
+        # Store Options and Put Spread analysis results
+        st.session_state.options_analysis_results = options_analysis_results
+        st.session_state.put_spread_analysis_results = put_spread_results
+        
+        # Summary of what was completed
+        completed_analyses = []
+        completed_analyses.append(f"✅ Volatility Analysis ({len(selected_tickers)} tickers)")
+        if vix_data is not None:
+            completed_analyses.append("✅ VIX Market Conditions")
+        if options_analysis_results:
+            completed_analyses.append(f"✅ Options Strategy ({len(options_analysis_results)} tickers)")
+        if put_spread_results:
+            completed_analyses.append(f"✅ Put Spread Analysis ({len(put_spread_results)} tickers)")
+        
+        st.sidebar.success("🎉 **Complete Analysis Finished!**")
+        st.sidebar.info("📋 **Completed:**\n" + "\n".join(completed_analyses))
+        st.sidebar.info("💡 **All tabs now have analysis results available immediately!**")
     
     # Check if we have results in session state
     results = getattr(st.session_state, 'results', {})
@@ -2050,8 +2169,78 @@ def main():
         with tab6:
             st.subheader("🎯 Enhanced Options Trading Strategy")
             
-            # Strategy configuration
-            st.markdown("### 📅 Trade Configuration")
+            # Check for existing analysis results
+            existing_options_results = getattr(st.session_state, 'options_analysis_results', {})
+            
+            if existing_options_results:
+                st.success(f"✅ **Options analysis already completed for {len(existing_options_results)} ticker(s)!**")
+                
+                # Display existing results first
+                st.markdown("### 📊 Current Analysis Results")
+                
+                # Ticker selection for viewing results
+                display_ticker = st.selectbox(
+                    "View results for ticker:",
+                    list(existing_options_results.keys()),
+                    help="Select ticker to view existing options analysis results"
+                )
+                
+                if display_ticker in existing_options_results:
+                    result = existing_options_results[display_ticker]
+                    
+                    # Display current analysis
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Current Price", f"${result['current_price']:.2f}")
+                    with col2:
+                        st.metric("Strategy Timeframe", result['strategy_timeframe'].title())
+                    with col3:
+                        st.metric("Target Probability", f"{result['target_probability']:.1%}")
+                    
+                    # 95% Probability Range
+                    bounds = result['probability_bounds']
+                    st.markdown("### 📊 95% Probability Price Range")
+                    st.markdown('<div class="metric-container">', unsafe_allow_html=True)
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Current Price", f"${result['current_price']:.2f}")
+                    with col2:
+                        st.metric("Lower Bound (95%)", f"${bounds['lower_95']:.2f}", f"-${result['current_price'] - bounds['lower_95']:.2f}")
+                    with col3:
+                        st.metric("Upper Bound (95%)", f"${bounds['upper_95']:.2f}", f"+${bounds['upper_95'] - result['current_price']:.2f}")
+                    with col4:
+                        st.metric("Range Width", f"${bounds['range_width']:.2f}")
+                    
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    # Best recommendation
+                    best_rec = result['best_recommendation']
+                    st.markdown('<div class="strike-recommend">', unsafe_allow_html=True)
+                    st.markdown(f"""
+                    ### 🏆 BEST RECOMMENDATION: ${best_rec['strike']:.2f} PUT
+                    
+                    **Analysis Results:**
+                    - **Strike Distance**: ${best_rec['distance_from_current']:.2f} ({best_rec['distance_pct']:.1f}%)
+                    - **Probability of Hit**: {best_rec['prob_below']:.1%}
+                    - **Safety Score**: {best_rec['safety_score']:.1%}
+                    - **95% Probability Zone**: {"✅ SAFE" if best_rec['strike'] >= bounds['lower_95'] else "⚠️ RISKY"}
+                    - **ATR**: ${result['atr']:.2f}
+                    """)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    # Show probability chart if available
+                    try:
+                        prob_fig = create_probability_chart(result['recommendations'], result['current_price'], display_ticker)
+                        if prob_fig:
+                            st.plotly_chart(prob_fig, use_container_width=True)
+                    except Exception as e:
+                        st.warning(f"Chart generation failed: {str(e)}")
+                
+                st.markdown("---")
+                
+            # Strategy configuration for new/re-run analysis
+            st.markdown("### 🔄 Run New Analysis (Optional)" if existing_options_results else "### 📅 Strategy Configuration")
             
             col1, col2 = st.columns(2)
             
@@ -2151,9 +2340,12 @@ def main():
                     help="How many strike prices to recommend"
                 )
             
-            if st.button("🚀 Generate Enhanced Options Strategy", type="primary"):
+            # Make the button optional for re-running with new parameters
+            button_text = "🔄 Re-run Analysis with New Parameters" if existing_options_results else "🚀 Generate Enhanced Options Strategy"
+            if st.button(button_text, type="secondary" if existing_options_results else "primary"):
                 try:
-                    st.info("🔄 Generating enhanced options strategy with 95% probability analysis...")
+                    button_info_text = "🔄 Re-running options strategy with new parameters..." if existing_options_results else "🔄 Generating enhanced options strategy with 95% probability analysis..."
+                    st.info(button_info_text)
                     
                     # Get current price
                     with st.spinner("Fetching current price..."):
@@ -2377,13 +2569,33 @@ def main():
                                 'timestamp': datetime.now().isoformat()
                             }
                         
-
+                        # Also update the session state results for immediate display
+                        if not hasattr(st.session_state, 'options_analysis_results'):
+                            st.session_state.options_analysis_results = {}
+                        
+                        st.session_state.options_analysis_results[strategy_ticker] = {
+                            'current_price': current_price,
+                            'strategy_timeframe': strategy_timeframe,
+                            'target_probability': target_probability,
+                            'recommendations': recommendations,
+                            'best_recommendation': recommendations[0],
+                            'probability_bounds': {
+                                'upper_95': upper_bound_95,
+                                'lower_95': lower_bound_95,
+                                'range_width': upper_bound_95 - lower_bound_95
+                            },
+                            'atr': atr,
+                            'analysis_data': analysis_data,
+                            'prob_dist': prob_dist,
+                            'timestamp': datetime.now().isoformat()
+                        }
                         
                     else:
                         if strategy_timeframe == 'weekly':
                             st.error(f"❌ No weekly data available for {strategy_ticker}")
                             st.error("Please ensure weekly analysis was included in the main analysis")
                         else:
+                            st.error(f"❌ No daily data available for {strategy_ticker}")
                             st.error(f"❌ No daily data available for {strategy_ticker}")
                             st.error("Please ensure daily analysis was included in the main analysis")
                 
@@ -2396,21 +2608,113 @@ def main():
         with tab7:
             st.subheader("📐 Advanced Put Spread Analysis")
             
-            st.subheader("🏗️ Black-Scholes Put Spread Probability Analysis")
+            # Check for existing analysis results
+            existing_put_spread_results = getattr(st.session_state, 'put_spread_analysis_results', {})
             
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%); 
-                        padding: 1.5rem; border-radius: 12px; margin: 1rem 0; 
-                        border-left: 4px solid var(--secondary-color);">
-                <h4 style="color: var(--secondary-color); margin: 0 0 1rem 0;">
-                    🎯 Advanced Options Analysis with Black-Scholes Formulas
-                </h4>
-                <p style="margin: 0; color: var(--text-secondary);">
-                    This analysis uses precise Black-Scholes calculations for Probability of Profit (POP) and 
-                    Probability of Touching (POT) for vertical put spreads with real options chain data.
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
+            if existing_put_spread_results:
+                st.success(f"✅ **Put Spread analysis already completed for {len(existing_put_spread_results)} ticker(s)!**")
+                
+                # Display existing results first
+                st.markdown("### 📊 Current Put Spread Analysis Results")
+                
+                # Ticker selection for viewing results
+                display_ticker = st.selectbox(
+                    "View Put Spread results for ticker:",
+                    list(existing_put_spread_results.keys()),
+                    help="Select ticker to view existing put spread analysis results",
+                    key="put_spread_display_ticker"
+                )
+                
+                if display_ticker in existing_put_spread_results:
+                    result_data = existing_put_spread_results[display_ticker]
+                    spread_results = result_data['analysis']
+                    
+                    # Display summary metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Current Price", f"${result_data['current_price']:.2f}")
+                    with col2:
+                        st.metric("Expiry Date", result_data['expiry_date'])
+                    with col3:
+                        st.metric("Scenarios", len(spread_results['scenarios']))
+                    with col4:
+                        st.metric("ATR Used", f"${result_data['atr_value']:.2f}" if result_data['atr_value'] else "N/A")
+                    
+                    # Best recommendation from existing analysis
+                    if spread_results['scenarios']:
+                        best_scenario = spread_results['scenarios'][0]
+                        if best_scenario['spreads']:
+                            best_spread = best_scenario['spreads'][0]
+                            
+                            st.markdown('<div class="strike-recommend">', unsafe_allow_html=True)
+                            st.markdown(f"""
+                            ### 🏆 OPTIMAL PUT SPREAD RECOMMENDATION
+                            
+                            **Strategy**: Buy ${best_spread['long_strike']:.2f} PUT / Sell ${best_spread['short_strike']:.2f} PUT
+                            
+                            **Analysis Results**:
+                            - **Probability of Profit**: {format_percentage(best_spread['prob_profit'])}
+                            - **Probability of Touching**: {format_percentage(best_scenario['actual_pot'])}
+                            - **Distance from Current**: ${best_scenario['distance_from_current']:.2f} ({best_scenario['distance_pct']:.1f}%)
+                            - **Max Profit**: ${best_spread['max_profit']:.2f}
+                            - **Spread Width**: ${best_spread['width']:.0f}
+                            - **Risk Level**: {"🟢 LOW RISK" if best_scenario['distance_pct'] > 5 else "🟡 MEDIUM RISK" if best_scenario['distance_pct'] > 2 else "🔴 HIGH RISK"}
+                            """)
+                            st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    # Show key POT levels
+                    st.markdown("### 🎯 Key POT Levels from Analysis")
+                    if len(spread_results['scenarios']) >= 5:
+                        col1, col2, col3, col4, col5 = st.columns(5)
+                        
+                        for i, scenario in enumerate(spread_results['scenarios'][:5]):
+                            target_pct = scenario['target_pot'] * 100
+                            strike = scenario['short_strike']
+                            distance_pct = scenario['distance_pct']
+                            
+                            with [col1, col2, col3, col4, col5][i]:
+                                st.metric(
+                                    f"{target_pct:.1f}% POT",
+                                    f"${strike:.2f}",
+                                    f"{distance_pct:.1f}% away"
+                                )
+                    
+                    # Show charts for existing results
+                    st.markdown("### 📊 Analysis Charts")
+                    
+                    chart_tab1, chart_tab2 = st.tabs(["📊 POT & POP Analysis", "📈 Strategy Comparison"])
+                    
+                    with chart_tab1:
+                        # POT/POP Distribution Charts
+                        dist_fig = create_pot_pop_distribution_charts(spread_results)
+                        if dist_fig:
+                            st.plotly_chart(dist_fig, use_container_width=True)
+                    
+                    with chart_tab2:
+                        # Strategy Comparison Charts
+                        comp_fig = create_strategy_comparison_chart(spread_results)
+                        if comp_fig:
+                            st.plotly_chart(comp_fig, use_container_width=True)
+                
+                st.markdown("---")
+            
+            # Configuration section for new/re-run analysis
+            st.markdown("### 🔄 Run New Analysis (Optional)" if existing_put_spread_results else "### 🏗️ Black-Scholes Put Spread Probability Analysis")
+            
+            if not existing_put_spread_results:
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%); 
+                            padding: 1.5rem; border-radius: 12px; margin: 1rem 0; 
+                            border-left: 4px solid var(--secondary-color);">
+                    <h4 style="color: var(--secondary-color); margin: 0 0 1rem 0;">
+                        🎯 Advanced Options Analysis with Black-Scholes Formulas
+                    </h4>
+                    <p style="margin: 0; color: var(--text-secondary);">
+                        This analysis uses precise Black-Scholes calculations for Probability of Profit (POP) and 
+                        Probability of Touching (POT) for vertical put spreads with real options chain data.
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
             
             # Put Spread Configuration
             st.markdown("### 📅 Put Spread Configuration")
@@ -2471,10 +2775,12 @@ def main():
                 key="custom_pot"
             )
             
-            # Generate analysis button
-            if st.button("🚀 Generate Advanced Put Spread Analysis", type="primary", key="spread_analysis_btn"):
+            # Make the button optional for re-running with new parameters
+            button_text = "🔄 Re-run Put Spread Analysis with New Parameters" if existing_put_spread_results else "🚀 Generate Advanced Put Spread Analysis"
+            if st.button(button_text, type="secondary" if existing_put_spread_results else "primary", key="spread_analysis_btn"):
                 try:
-                    st.info("🔄 Generating comprehensive put spread analysis with Black-Scholes formulas...")
+                    button_info_text = "🔄 Re-running put spread analysis with new parameters..." if existing_put_spread_results else "🔄 Generating comprehensive put spread analysis with Black-Scholes formulas..."
+                    st.info(button_info_text)
                     
                     # Initialize analyzer - use global PUT_SPREAD_AVAILABLE check
                     if not PUT_SPREAD_AVAILABLE:
@@ -2534,26 +2840,20 @@ def main():
                     if spread_results and spread_results['scenarios']:
                         st.success("✅ Put spread analysis complete!")
                         
-                        # Store put spread analysis in session state for Summary AI
-                        if spread_results and spread_results['scenarios']:
-                            best_scenario = spread_results['scenarios'][0]
-                            best_spread = best_scenario['spreads'][0] if best_scenario.get('spreads') else None
-                            
-                            st.session_state.last_put_spread_analysis = {
-                                'ticker': spread_ticker,
-                                'expiry_date': spread_results['expiry_date'],
-                                'current_price': spread_results['current_price'],
-                                'scenarios_count': len(spread_results['scenarios']),
-                                'best_pot_target': best_scenario['target_pot'],
-                                'best_pot_actual': best_scenario['actual_pot'],
-                                'best_strike': best_scenario['short_strike'],
-                                'best_distance_pct': best_scenario['distance_pct'],
-                                'best_pop': best_spread['prob_profit'] if best_spread else None,
-                                'volatility_used': spread_results['volatility'],
-                                'options_data_available': spread_results.get('options_data_available', False),
-                                'timestamp': datetime.now().isoformat()
-                            }
+                        # Update session state with new results
+                        if not hasattr(st.session_state, 'put_spread_analysis_results'):
+                            st.session_state.put_spread_analysis_results = {}
                         
+                        st.session_state.put_spread_analysis_results[spread_ticker] = {
+                            'analysis': spread_results,
+                            'expiry_date': spread_expiry,
+                            'pot_levels': pot_levels,
+                            'current_price': current_price,
+                            'atr_value': atr_value,
+                            'timestamp': datetime.now().isoformat()
+                        }
+                        
+                        # === COMPLETE DETAILED ANALYSIS DISPLAY ===
                         # Display comprehensive Black-Scholes parameters
                         st.markdown("### 📊 Black-Scholes Analysis Parameters")
                         
@@ -2900,23 +3200,23 @@ def main():
                             
                             # Add POP vs POT scatter plot
                             if spread_results['scenarios']:
-                                pot_data = [s['actual_pot'] * 100 for s in spread_results['scenarios']]
-                                pop_data = [s['spreads'][0]['prob_profit'] * 100 for s in spread_results['scenarios'] if s.get('spreads')]
-                                distance_data = [s['distance_pct'] for s in spread_results['scenarios']]
-                                target_pot_data = [s['target_pot'] * 100 for s in spread_results['scenarios']]
+                                pot_data_chart = [s['actual_pot'] * 100 for s in spread_results['scenarios']]
+                                pop_data_chart = [s['spreads'][0]['prob_profit'] * 100 for s in spread_results['scenarios'] if s.get('spreads')]
+                                distance_data_chart = [s['distance_pct'] for s in spread_results['scenarios']]
+                                target_pot_data_chart = [s['target_pot'] * 100 for s in spread_results['scenarios']]
                                 
-                                if pot_data and pop_data and len(pot_data) == len(pop_data):
+                                if pot_data_chart and pop_data_chart and len(pot_data_chart) == len(pop_data_chart):
                                     fig_pop_pot = go.Figure()
                                     
                                     fig_pop_pot.add_trace(go.Scatter(
-                                        x=pot_data,
-                                        y=pop_data,
+                                        x=pot_data_chart,
+                                        y=pop_data_chart,
                                         mode='markers+text',
-                                        text=[f"{t:.1f}%" for t in target_pot_data[:len(pop_data)]],
+                                        text=[f"{t:.1f}%" for t in target_pot_data_chart[:len(pop_data_chart)]],
                                         textposition='top center',
                                         marker=dict(
-                                            size=[d/2 + 8 for d in distance_data[:len(pop_data)]],
-                                            color=distance_data[:len(pop_data)],
+                                            size=[d/2 + 8 for d in distance_data_chart[:len(pop_data_chart)]],
+                                            color=distance_data_chart[:len(pop_data_chart)],
                                             colorscale='RdYlGn',
                                             showscale=True,
                                             colorbar=dict(title="Distance %")
@@ -2973,17 +3273,19 @@ def main():
                                 with col3:
                                     volatility_used = spread_results['volatility'] * 100
                                     st.metric("Volatility Used", f"{volatility_used:.1f}%")
-                    
+                        
+                        st.success("✅ Results updated! Detailed analysis completed.")
+                        
                     else:
                         st.error("❌ Could not generate put spread analysis. Check data availability.")
-                    
+                        
                 except Exception as e:
                     st.error(f"❌ Put spread analysis failed: {str(e)}")
                     import traceback
                     st.code(traceback.format_exc())
-    
+        
     else:
-        # No analysis run yet - show standalone Options
+        # No analysis run yet - show instruction message
         st.markdown("""
         <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); 
                     padding: 2rem; border-radius: 16px; margin: 2rem 0; 
@@ -2992,7 +3294,10 @@ def main():
                 📊 Enhanced Stock Volatility Analyzer
             </h2>
             <p style="color: var(--text-secondary); margin: 0.5rem 0 0 0; font-size: 1.1rem;">
-                ℹ️ Run the Enhanced Analysis first to see all features, or use Basic Options Strategy below.
+                ℹ️ Press "🚀 Run Enhanced Analysis" in the sidebar to automatically run ALL analyses across ALL tabs!
+            </p>
+            <p style="color: var(--text-secondary); margin: 0.5rem 0 0 0; font-size: 1rem;">
+                <strong>One-click solution:</strong> Volatility Analysis + Options Strategy + Put Spread Analysis + VIX Analysis + All Charts and Statistics
             </p>
         </div>
         """, unsafe_allow_html=True)
