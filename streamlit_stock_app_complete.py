@@ -43,34 +43,275 @@ warnings.filterwarnings('ignore')
 # Page configuration
 st.set_page_config(
     page_title="Stock Volatility Analyzer",
-    page_icon="📊",
+    page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Custom CSS for modern professional styling
 st.markdown("""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    
+    :root {
+        --primary-color: #6366f1;
+        --primary-light: #818cf8;
+        --primary-dark: #4f46e5;
+        --secondary-color: #06b6d4;
+        --accent-color: #f59e0b;
+        --success-color: #10b981;
+        --warning-color: #f59e0b;
+        --error-color: #ef4444;
+        --background-primary: #ffffff;
+        --background-secondary: #f8fafc;
+        --background-tertiary: #f1f5f9;
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+        --text-light: #94a3b8;
+        --border-color: #e2e8f0;
+        --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+        --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        --gradient-secondary: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+    }
+    
+    .main {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        color: var(--text-primary);
+    }
+    
     .main-header {
-        font-size: 3rem;
-        font-weight: bold;
+        font-size: 3.5rem;
+        font-weight: 700;
         text-align: center;
-        color: #1f77b4;
-        margin-bottom: 2rem;
+        background: var(--gradient-primary);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 3rem;
+        letter-spacing: -0.025em;
+        line-height: 1.1;
     }
+    
     .metric-container {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
+        background: var(--background-secondary);
+        padding: 1.5rem;
+        border-radius: 16px;
+        margin: 1rem 0;
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow-sm);
+        transition: all 0.2s ease-in-out;
     }
-    .vix-calm { background-color: #d4edda; padding: 0.5rem; border-radius: 0.25rem; }
-    .vix-normal { background-color: #cce5ff; padding: 0.5rem; border-radius: 0.25rem; }
-    .vix-choppy { background-color: #fff3cd; padding: 0.5rem; border-radius: 0.25rem; }
-    .vix-volatile { background-color: #f8d7da; padding: 0.5rem; border-radius: 0.25rem; }
-    .vix-extreme { background-color: #f5c6cb; padding: 0.5rem; border-radius: 0.25rem; }
-    .trade-recommend { background-color: #e7f3ff; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #0066cc; }
-    .strike-recommend { background-color: #f0fff4; padding: 0.75rem; border-radius: 0.5rem; border: 1px solid #28a745; }
+    
+    .metric-container:hover {
+        box-shadow: var(--shadow-md);
+        transform: translateY(-2px);
+    }
+    
+    /* VIX Condition Styling with Modern Colors */
+    .vix-calm { 
+        background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+        padding: 1rem; 
+        border-radius: 12px; 
+        border-left: 4px solid var(--success-color);
+        box-shadow: var(--shadow-sm);
+    }
+    .vix-normal { 
+        background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+        padding: 1rem; 
+        border-radius: 12px; 
+        border-left: 4px solid var(--secondary-color);
+        box-shadow: var(--shadow-sm);
+    }
+    .vix-choppy { 
+        background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+        padding: 1rem; 
+        border-radius: 12px; 
+        border-left: 4px solid var(--warning-color);
+        box-shadow: var(--shadow-sm);
+    }
+    .vix-volatile { 
+        background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%);
+        padding: 1rem; 
+        border-radius: 12px; 
+        border-left: 4px solid var(--error-color);
+        box-shadow: var(--shadow-sm);
+    }
+    .vix-extreme { 
+        background: linear-gradient(135deg, #450a0a 0%, #7f1d1d 100%);
+        color: white;
+        padding: 1rem; 
+        border-radius: 12px; 
+        border-left: 4px solid #dc2626;
+        box-shadow: var(--shadow-lg);
+    }
+    
+    .trade-recommend { 
+        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+        padding: 1.5rem; 
+        border-radius: 16px; 
+        border-left: 6px solid var(--primary-color);
+        box-shadow: var(--shadow-md);
+        margin: 1rem 0;
+    }
+    
+    .strike-recommend { 
+        background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+        padding: 1.5rem; 
+        border-radius: 16px; 
+        border: 2px solid var(--success-color);
+        box-shadow: var(--shadow-lg);
+        margin: 1rem 0;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .strike-recommend::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: var(--gradient-primary);
+    }
+    
+    /* Sidebar Styling */
+    .css-1d391kg {
+        background: var(--background-tertiary);
+    }
+    
+    /* Button Styling */
+    .stButton > button {
+        background: var(--gradient-primary);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 0.75rem 1.5rem;
+        font-weight: 600;
+        font-family: 'Inter', sans-serif;
+        transition: all 0.2s ease-in-out;
+        box-shadow: var(--shadow-sm);
+    }
+    
+    .stButton > button:hover {
+        box-shadow: var(--shadow-md);
+        transform: translateY(-2px);
+    }
+    
+    /* Tab Styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background: var(--background-secondary);
+        border-radius: 12px;
+        padding: 0.5rem;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        font-weight: 500;
+        color: var(--text-secondary);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        transition: all 0.2s ease-in-out;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: var(--gradient-primary);
+        color: white;
+        box-shadow: var(--shadow-sm);
+    }
+    
+    /* Metric Styling */
+    [data-testid="metric-container"] {
+        background: var(--background-secondary);
+        border: 1px solid var(--border-color);
+        padding: 1rem;
+        border-radius: 12px;
+        box-shadow: var(--shadow-sm);
+    }
+    
+    /* Code blocks */
+    .stCodeBlock {
+        font-family: 'JetBrains Mono', monospace;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+    }
+    
+    /* Info boxes */
+    .stAlert {
+        border-radius: 12px;
+        border: none;
+        box-shadow: var(--shadow-sm);
+    }
+    
+    /* Selectbox and other inputs */
+    .stSelectbox > div > div {
+        border-radius: 8px;
+        border-color: var(--border-color);
+    }
+    
+    .stTextInput > div > div {
+        border-radius: 8px;
+        border-color: var(--border-color);
+    }
+    
+    /* Data tables */
+    .dataframe {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+    }
+    
+    /* Progress bar */
+    .stProgress .st-bo {
+        background: var(--gradient-primary);
+        border-radius: 4px;
+    }
+    
+    /* Custom success/warning/error styling */
+    .success-highlight {
+        background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+        padding: 1rem;
+        border-radius: 12px;
+        border-left: 4px solid var(--success-color);
+        color: #065f46;
+        font-weight: 500;
+    }
+    
+    .warning-highlight {
+        background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+        padding: 1rem;
+        border-radius: 12px;
+        border-left: 4px solid var(--warning-color);
+        color: #92400e;
+        font-weight: 500;
+    }
+    
+    .error-highlight {
+        background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%);
+        padding: 1rem;
+        border-radius: 12px;
+        border-left: 4px solid var(--error-color);
+        color: #991b1b;
+        font-weight: 500;
+    }
+    
+    /* Sidebar header styling */
+    .css-1lcbmhc {
+        background: var(--gradient-secondary);
+        color: white;
+        padding: 1rem;
+        border-radius: 12px;
+        margin-bottom: 1rem;
+    }
+    
+    /* Chart container styling */
+    .js-plotly-plot {
+        border-radius: 12px;
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -440,8 +681,8 @@ def create_price_chart(data, ticker, timeframe, show_vix=False):
             x=data.index,
             y=data['range'],
             name='Range',
-            marker_color='lightblue',
-            opacity=0.7
+            marker_color='rgba(99, 102, 241, 0.7)',
+            opacity=0.8
         ),
         row=2, col=1
     )
@@ -456,7 +697,7 @@ def create_price_chart(data, ticker, timeframe, show_vix=False):
                 y=atr_line,
                 mode='lines',
                 name=f'{atr_window}-period ATR',
-                line=dict(color='red', width=2)
+                line=dict(color='#ef4444', width=3)
             ),
             row=2, col=1
         )
@@ -469,17 +710,17 @@ def create_price_chart(data, ticker, timeframe, show_vix=False):
                 y=data['VIX_Close'],
                 mode='lines+markers',
                 name='VIX',
-                line=dict(color='purple', width=2),
-                marker=dict(size=4)
+                line=dict(color='#8b5cf6', width=3),
+                marker=dict(size=5, color='#8b5cf6')
             ),
             row=3, col=1
         )
         
         # Add VIX level zones
-        fig.add_hline(y=15, line_dash="dash", line_color="green", opacity=0.5, row=3)
-        fig.add_hline(y=19, line_dash="dash", line_color="blue", opacity=0.5, row=3)
-        fig.add_hline(y=25, line_dash="dash", line_color="orange", opacity=0.5, row=3)
-        fig.add_hline(y=35, line_dash="dash", line_color="red", opacity=0.5, row=3)
+        fig.add_hline(y=15, line_dash="dash", line_color="#10b981", opacity=0.6, row=3)
+        fig.add_hline(y=19, line_dash="dash", line_color="#06b6d4", opacity=0.6, row=3)
+        fig.add_hline(y=25, line_dash="dash", line_color="#f59e0b", opacity=0.6, row=3)
+        fig.add_hline(y=35, line_dash="dash", line_color="#ef4444", opacity=0.6, row=3)
     
     fig.update_layout(
         title=f'{ticker} - {timeframe.title()} Analysis with Enhanced ATR',
@@ -537,8 +778,8 @@ def create_vix_analysis_chart(vix_data):
         y=vix_data['VIX_Close'],
         mode='lines+markers',
         name='VIX',
-        line=dict(color='purple', width=3),
-        marker=dict(size=5)
+        line=dict(color='#8b5cf6', width=3),
+        marker=dict(size=5, color='#8b5cf6')
     ))
     
     # Add condition zones
@@ -574,8 +815,8 @@ def create_probability_chart(recommendations, current_price, ticker):
         x=strikes,
         y=probs_below,
         name='Probability Below (%)',
-        marker_color='lightcoral',
-        opacity=0.7
+        marker_color='rgba(239, 68, 68, 0.7)',
+        opacity=0.8
     ))
     
     # Safety score line
@@ -584,17 +825,17 @@ def create_probability_chart(recommendations, current_price, ticker):
         y=safety_scores,
         mode='lines+markers',
         name='Safety Score (%)',
-        line=dict(color='green', width=3),
-        marker=dict(size=8),
+        line=dict(color='#10b981', width=4),
+        marker=dict(size=10, color='#10b981'),
         yaxis='y2'
     ))
     
     # Add current price line
-    fig.add_vline(x=current_price, line_dash="dash", line_color="blue", 
+    fig.add_vline(x=current_price, line_dash="dash", line_color="#6366f1", 
                   annotation_text=f"Current: ${current_price:.2f}")
     
     # Add 10% probability line
-    fig.add_hline(y=10, line_dash="dash", line_color="red", 
+    fig.add_hline(y=10, line_dash="dash", line_color="#ef4444", 
                   annotation_text="10% Target")
     
     fig.update_layout(
@@ -613,8 +854,15 @@ def create_probability_chart(recommendations, current_price, ticker):
     return fig
 
 def main():
-    # Header
-    st.markdown('<div class="main-header">📊 Enhanced Stock Volatility Analyzer with Options Strategy</div>', unsafe_allow_html=True)
+    # Header with modern gradient design
+    st.markdown("""
+    <div style="text-align: center; padding: 2rem 0;">
+        <div class="main-header">🎯 Stock Volatility Analyzer</div>
+        <p style="font-size: 1.25rem; color: var(--text-secondary); font-weight: 400; margin-top: -1rem;">
+            Advanced Options Strategy with 95% Probability Analysis
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Initialize session state variables to prevent scoping errors
     if 'results' not in st.session_state:
@@ -666,10 +914,10 @@ def main():
     # Validate minimum 90 days
     date_range = (end_date - start_date).days
     if date_range < 90:
-        st.sidebar.error("Please select at least 90 days of data for meaningful analysis")
+        st.sidebar.markdown('<div class="error-highlight">Please select at least 90 days of data for meaningful analysis</div>', unsafe_allow_html=True)
         return
     
-    st.sidebar.success(f"Selected range: {date_range} days")
+    st.sidebar.markdown(f'<div class="success-highlight">Selected range: {date_range} days</div>', unsafe_allow_html=True)
     
     # Time window selection
     st.sidebar.subheader("Analysis Timeframes")
@@ -700,9 +948,9 @@ def main():
             with st.spinner("Fetching VIX data..."):
                 vix_data = fetch_vix_data(start_date, end_date)
                 if vix_data is not None:
-                    st.sidebar.success("✅ VIX data loaded successfully")
+                    st.sidebar.markdown('<div class="success-highlight">✅ VIX data loaded successfully</div>', unsafe_allow_html=True)
                 else:
-                    st.sidebar.warning("⚠️ VIX data unavailable")
+                    st.sidebar.markdown('<div class="warning-highlight">⚠️ VIX data unavailable</div>', unsafe_allow_html=True)
         
         # Main content area
         results = {}
@@ -762,8 +1010,18 @@ def main():
     # CREATE TABS - ALWAYS AVAILABLE
     if results and len(results) > 0:
         # Full analysis with all tabs
-        st.header("📈 Enhanced Analysis Results")
-        st.info("Analysis results from your last run. All tabs are now available!")
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); 
+                    padding: 2rem; border-radius: 16px; margin: 2rem 0; 
+                    border-left: 6px solid var(--primary-color); box-shadow: var(--shadow-md);">
+            <h2 style="color: var(--primary-color); margin: 0; font-weight: 700;">
+                📈 Enhanced Analysis Results
+            </h2>
+            <p style="color: var(--text-secondary); margin: 0.5rem 0 0 0; font-size: 1.1rem;">
+                Analysis results from your last run. All tabs are now available!
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
         
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📊 Summary", 
@@ -1300,8 +1558,18 @@ def main():
     
     else:
         # No analysis run yet - show standalone Options Strategy
-        st.header("📊 Enhanced Stock Volatility Analyzer with Options Strategy")
-        st.info("ℹ️ Run the Enhanced Analysis first to see all features, or use Basic Options Strategy below.")
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); 
+                    padding: 2rem; border-radius: 16px; margin: 2rem 0; 
+                    border-left: 6px solid var(--warning-color); box-shadow: var(--shadow-md);">
+            <h2 style="color: var(--warning-color); margin: 0; font-weight: 700;">
+                📊 Enhanced Stock Volatility Analyzer
+            </h2>
+            <p style="color: var(--text-secondary); margin: 0.5rem 0 0 0; font-size: 1.1rem;">
+                ℹ️ Run the Enhanced Analysis first to see all features, or use Basic Options Strategy below.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Create standalone Options Strategy container
         st.subheader("🎯 Basic Options Trading Strategy")
