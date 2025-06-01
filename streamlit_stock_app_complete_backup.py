@@ -829,348 +829,6 @@ def create_vix_analysis_chart(vix_data):
     
     return fig
 
-
-def create_price_distribution_chart(data, ticker, timeframe):
-    """Create price distribution histogram and box plot"""
-    if data is None or data.empty:
-        return None
-    
-    fig = make_subplots(
-        rows=2, cols=2,
-        subplot_titles=[
-            f'{ticker} Close Price Distribution',
-            f'{ticker} Daily Returns Distribution', 
-            f'{ticker} Price Range Box Plot',
-            f'{ticker} Volume Distribution'
-        ],
-        specs=[[{"secondary_y": False}, {"secondary_y": False}],
-               [{"secondary_y": False}, {"secondary_y": False}]]
-    )
-    
-    # Price distribution histogram
-    fig.add_trace(
-        go.Histogram(
-            x=data['Close'],
-            nbinsx=30,
-            name='Close Price',
-            marker_color='rgba(99, 102, 241, 0.7)'
-        ),
-        row=1, col=1
-    )
-    
-    # Returns distribution (if we have enough data)
-    if len(data) > 1:
-        returns = data['Close'].pct_change().dropna() * 100
-        fig.add_trace(
-            go.Histogram(
-                x=returns,
-                nbinsx=30,
-                name='Daily Returns (%)',
-                marker_color='rgba(16, 185, 129, 0.7)'
-            ),
-            row=1, col=2
-        )
-    
-    # Price range box plot
-    price_data = [data['High'], data['Low'], data['Close']]
-    price_labels = ['High', 'Low', 'Close']
-    
-    for i, (prices, label) in enumerate(zip(price_data, price_labels)):
-        fig.add_trace(
-            go.Box(
-                y=prices,
-                name=label,
-                boxpoints='outliers'
-            ),
-            row=2, col=1
-        )
-    
-    # Volume distribution (if available)
-    if 'Volume' in data.columns:
-        fig.add_trace(
-            go.Histogram(
-                x=data['Volume'],
-                nbinsx=25,
-                name='Volume',
-                marker_color='rgba(245, 158, 11, 0.7)'
-            ),
-            row=2, col=2
-        )
-    
-    fig.update_layout(
-        title=f'{ticker} Statistical Distribution Analysis ({timeframe.title()})',
-        height=600,
-        showlegend=True
-    )
-    
-    return fig
-
-def create_volatility_analysis_chart(data, ticker, timeframe):
-    """Create comprehensive volatility analysis charts"""
-    if data is None or data.empty or len(data) < 5:
-        return None
-    
-    fig = make_subplots(
-        rows=2, cols=2,
-        subplot_titles=[
-            'True Range Distribution',
-            'ATR Evolution Over Time',
-            'Range vs Close Price Correlation', 
-            'Volatility Percentiles'
-        ]
-    )
-    
-    # True Range distribution
-    if 'true_range' in data.columns:
-        fig.add_trace(
-            go.Histogram(
-                x=data['true_range'],
-                nbinsx=25,
-                name='True Range',
-                marker_color='rgba(239, 68, 68, 0.7)'
-            ),
-            row=1, col=1
-        )
-        
-        # ATR over time
-        atr_window = min(14, len(data))
-        if atr_window > 1:
-            atr_series = data['true_range'].rolling(window=atr_window).mean()
-            fig.add_trace(
-                go.Scatter(
-                    x=data.index,
-                    y=atr_series,
-                    mode='lines',
-                    name=f'ATR ({atr_window})',
-                    line=dict(color='#ef4444', width=2)
-                ),
-                row=1, col=2
-            )
-    
-    # Range vs Close correlation scatter
-    if 'range' in data.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=data['Close'],
-                y=data['range'],
-                mode='markers',
-                name='Range vs Price',
-                marker=dict(
-                    color=data.index.map(lambda x: x.toordinal()),
-                    colorscale='Viridis',
-                    size=6,
-                    opacity=0.7
-                )
-            ),
-            row=2, col=1
-        )
-        
-        # Volatility percentiles
-        range_percentiles = data['range'].quantile([0.1, 0.25, 0.5, 0.75, 0.9])
-        fig.add_trace(
-            go.Bar(
-                x=['10th', '25th', '50th', '75th', '90th'],
-                y=range_percentiles.values,
-                name='Range Percentiles',
-                marker_color='rgba(99, 102, 241, 0.8)'
-            ),
-            row=2, col=2
-        )
-    
-    fig.update_layout(
-        title=f'{ticker} Volatility Analysis ({timeframe.title()})',
-        height=600,
-        showlegend=True
-    )
-    
-    return fig
-
-def create_pot_analysis_charts(spread_results):
-    """Create POT analysis statistical charts"""
-    if not spread_results or not spread_results.get('scenarios'):
-        return None
-    
-    scenarios = spread_results['scenarios']
-    
-    fig = make_subplots(
-        rows=2, cols=2,
-        subplot_titles=[
-            'POT Distribution by Target Level',
-            'Strike Distance Distribution',
-            'Safety Level Analysis',
-            'POT vs Distance Correlation'
-        ],
-        specs=[[{"secondary_y": False}, {"secondary_y": False}],
-               [{"type": "pie"}, {"secondary_y": False}]]
-    )
-    
-    # Extract data
-    target_pots = [s['target_pot'] * 100 for s in scenarios]
-    actual_pots = [s['actual_pot'] * 100 for s in scenarios]  
-    distances = [s['distance_pct'] for s in scenarios]
-    strikes = [s['short_strike'] for s in scenarios]
-    
-    # POT accuracy analysis
-    fig.add_trace(
-        go.Scatter(
-            x=target_pots,
-            y=actual_pots,
-            mode='markers+lines',
-            name='Target vs Actual POT',
-            marker=dict(size=8, color='rgba(99, 102, 241, 0.8)'),
-            line=dict(color='rgba(99, 102, 241, 0.8)', width=2)
-        ),
-        row=1, col=1
-    )
-    
-    # Add perfect correlation line
-    fig.add_trace(
-        go.Scatter(
-            x=[0, max(target_pots)],
-            y=[0, max(target_pots)],
-            mode='lines',
-            name='Perfect Match',
-            line=dict(color='red', dash='dash', width=1)
-        ),
-        row=1, col=1
-    )
-    
-    # Distance distribution
-    fig.add_trace(
-        go.Histogram(
-            x=distances,
-            nbinsx=15,
-            name='Distance %',
-            marker_color='rgba(16, 185, 129, 0.7)'
-        ),
-        row=1, col=2
-    )
-    
-    # Safety level pie chart
-    safety_counts = {}
-    for distance in distances:
-        if distance > 5:
-            safety = "Very Safe"
-        elif distance > 3:
-            safety = "Safe"
-        elif distance > 2:
-            safety = "Moderate"
-        else:
-            safety = "Risky"
-        safety_counts[safety] = safety_counts.get(safety, 0) + 1
-    
-    if safety_counts:
-        fig.add_trace(
-            go.Pie(
-                labels=list(safety_counts.keys()),
-                values=list(safety_counts.values()),
-                name="Safety Levels"
-            ),
-            row=2, col=1
-        )
-    
-    # POT vs Distance correlation
-    fig.add_trace(
-        go.Scatter(
-            x=actual_pots,
-            y=distances,
-            mode='markers',
-            name='POT vs Distance',
-            marker=dict(
-                size=8,
-                color=target_pots,
-                colorscale='RdYlBu_r',
-                showscale=True,
-                colorbar=dict(title="Target POT %")
-            )
-        ),
-        row=2, col=2
-    )
-    
-    fig.update_layout(
-        title='Put Spread POT Statistical Analysis',
-        height=700,
-        showlegend=True
-    )
-    
-    return fig
-
-def create_strategy_comparison_chart(spread_results):
-    """Create strategy comparison charts"""
-    if not spread_results or not spread_results.get('scenarios'):
-        return None
-    
-    scenarios = spread_results['scenarios']
-    
-    # Create comparison data
-    comparison_data = []
-    for scenario in scenarios:
-        if scenario.get('spreads'):
-            best_spread = scenario['spreads'][0]
-            comparison_data.append({
-                'Target POT': f"{scenario['target_pot']:.1%}",
-                'Strike Price': scenario['short_strike'],
-                'Distance %': scenario['distance_pct'],
-                'Actual POT': scenario['actual_pot'] * 100,
-                'Prob Profit': best_spread['prob_profit'] * 100,
-                'Max Profit': best_spread['max_profit']
-            })
-    
-    if not comparison_data:
-        return None
-    
-    df = pd.DataFrame(comparison_data)
-    
-    fig = make_subplots(
-        rows=1, cols=2,
-        subplot_titles=['Risk vs Reward Analysis', 'Strike Price Comparison']
-    )
-    
-    # Risk vs Reward scatter
-    fig.add_trace(
-        go.Scatter(
-            x=df['Distance %'],
-            y=df['Prob Profit'],
-            mode='markers+text',
-            text=df['Target POT'],
-            textposition='top center',
-            name='Strategies',
-            marker=dict(
-                size=df['Max Profit'] * 2,  # Size by max profit
-                color=df['Actual POT'],
-                colorscale='RdYlGn_r',
-                showscale=True,
-                colorbar=dict(title="Actual POT %")
-            )
-        ),
-        row=1, col=1
-    )
-    
-    # Strike price comparison
-    fig.add_trace(
-        go.Bar(
-            x=df['Target POT'],
-            y=df['Strike Price'],
-            name='Strike Prices',
-            marker_color='rgba(99, 102, 241, 0.8)'
-        ),
-        row=1, col=2
-    )
-    
-    fig.update_xaxes(title_text="Distance from Current (%)", row=1, col=1)
-    fig.update_yaxes(title_text="Probability of Profit (%)", row=1, col=1)
-    fig.update_xaxes(title_text="Target POT Level", row=1, col=2)
-    fig.update_yaxes(title_text="Strike Price ($)", row=1, col=2)
-    
-    fig.update_layout(
-        title='Put Spread Strategy Comparison',
-        height=500,
-        showlegend=True
-    )
-    
-    return fig
-
-
 def create_probability_chart(recommendations, current_price, ticker):
     """Create probability visualization chart"""
     if not recommendations:
@@ -1248,24 +906,6 @@ def main():
     
     # Sidebar for controls
     st.sidebar.header("Analysis Parameters")
-    
-    # AI Analysis Configuration
-    st.sidebar.subheader("🤖 AI Analysis Settings")
-    enable_ai_analysis = st.sidebar.checkbox(
-        "Enable AI Analysis", 
-        value=False,
-        help="Check to enable AI-powered analysis on all tabs"
-    )
-    
-    if enable_ai_analysis:
-        api_key_available = bool(os.getenv('OPENAI_API_KEY'))
-        if not api_key_available:
-            st.sidebar.warning("⚠️ Set OPENAI_API_KEY environment variable to enable AI analysis")
-            enable_ai_analysis = False
-        else:
-            st.sidebar.success("✅ AI Analysis Ready")
-    
-    st.sidebar.markdown("---")
     
     # Ticker selection
     default_tickers = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'TSLA', 'GLD', 'NDX']
@@ -1413,14 +1053,13 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📊 Summary", 
             "📈 Price Charts", 
             "🔍 Detailed Stats", 
             "⚖️ Comparison", 
             "📉 VIX Analysis",
-            "🎯 Options Strategy",
-            "📐 Put Spread Analysis"
+            "🎯 Options Strategy"
         ])
         
         with tab1:
@@ -1560,7 +1199,6 @@ def main():
                 chart_data = results[chart_ticker][chart_timeframe]['data']
                 show_vix_chart = include_vix and chart_timeframe == 'daily' and vix_data is not None
                 
-                # Main price chart
                 fig = create_price_chart(chart_data, chart_ticker, chart_timeframe, show_vix_chart)
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
@@ -1574,105 +1212,6 @@ def main():
                     - 🟣 **Purple Line**: VIX levels (daily charts only)
                     - **Horizontal Lines**: VIX condition thresholds
                     """)
-                
-                # Statistical Analysis Section
-                st.markdown("### 📊 Statistical Analysis")
-                
-                # Create tabs for different statistical views
-                stat_tab1, stat_tab2 = st.tabs(["📈 Price Distributions", "📊 Volatility Analysis"])
-                
-                with stat_tab1:
-                    # Price distribution charts
-                    dist_fig = create_price_distribution_chart(chart_data, chart_ticker, chart_timeframe)
-                    if dist_fig:
-                        st.plotly_chart(dist_fig, use_container_width=True)
-                        
-                        # Statistical summary
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            price_mean = chart_data['Close'].mean()
-                            price_std = chart_data['Close'].std()
-                            st.metric("Price Mean", f"${price_mean:.2f}")
-                            st.metric("Price Std Dev", f"${price_std:.2f}")
-                        
-                        with col2:
-                            if len(chart_data) > 1:
-                                returns = chart_data['Close'].pct_change().dropna()
-                                returns_mean = returns.mean() * 100
-                                returns_std = returns.std() * 100
-                                st.metric("Avg Return", f"{returns_mean:.2f}%")
-                                st.metric("Return Volatility", f"{returns_std:.2f}%")
-                        
-                        with col3:
-                            if 'Volume' in chart_data.columns:
-                                vol_mean = chart_data['Volume'].mean()
-                                vol_std = chart_data['Volume'].std()
-                                st.metric("Avg Volume", f"{vol_mean:,.0f}")
-                                st.metric("Volume Std", f"{vol_std:,.0f}")
-                
-                with stat_tab2:
-                    # Volatility analysis charts
-                    vol_fig = create_volatility_analysis_chart(chart_data, chart_ticker, chart_timeframe)
-                    if vol_fig:
-                        st.plotly_chart(vol_fig, use_container_width=True)
-                        
-                        # Volatility metrics
-                        if 'true_range' in chart_data.columns:
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                tr_mean = chart_data['true_range'].mean()
-                                tr_std = chart_data['true_range'].std()
-                                st.metric("Avg True Range", f"${tr_mean:.2f}")
-                                st.metric("TR Volatility", f"${tr_std:.2f}")
-                            
-                            with col2:
-                                atr_14 = chart_data['true_range'].rolling(14).mean().iloc[-1]
-                                if not pd.isna(atr_14):
-                                    st.metric("Current ATR (14)", f"${atr_14:.2f}")
-                                
-                                # ATR percentile
-                                atr_series = chart_data['true_range'].rolling(14).mean()
-                                current_percentile = (atr_series <= atr_14).mean() * 100
-                                st.metric("ATR Percentile", f"{current_percentile:.0f}th")
-                            
-                            with col3:
-                                range_efficiency = (chart_data['true_range'] / chart_data['Close']).mean() * 100
-                                st.metric("Range Efficiency", f"{range_efficiency:.2f}%")
-                
-                # AI Analysis for Price Charts
-                if enable_ai_analysis and LLM_AVAILABLE:
-                    st.markdown("---")
-                    st.markdown("### 🤖 AI Price Analysis")
-                    
-                    if st.button("🧠 Generate AI Price Analysis", key="price_ai_btn"):
-                        with st.spinner("🤖 AI analyzing price patterns..."):
-                            try:
-                                llm_analyzer = get_llm_analyzer()
-                                if llm_analyzer:
-                                    # Prepare price data for AI
-                                    price_summary = {
-                                        'ticker': chart_ticker,
-                                        'timeframe': chart_timeframe,
-                                        'current_price': chart_data['Close'].iloc[-1],
-                                        'price_change': chart_data['Close'].iloc[-1] - chart_data['Close'].iloc[0],
-                                        'volatility': chart_data['true_range'].mean() if 'true_range' in chart_data.columns else None,
-                                        'trend': 'Bullish' if chart_data['Close'].iloc[-1] > chart_data['Close'].iloc[0] else 'Bearish'
-                                    }
-                                    
-                                    # Generate AI analysis (you'll need to add this method to llm_analysis.py)
-                                    # For now, show a placeholder
-                                    st.markdown("""
-                                    <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); 
-                                                padding: 1.5rem; border-radius: 12px; margin: 1rem 0; 
-                                                border-left: 4px solid var(--secondary-color);">
-                                        <h4 style="color: var(--secondary-color); margin: 0 0 1rem 0;">
-                                            🤖 AI Price Pattern Analysis
-                                        </h4>
-                                        <p>AI analysis for price patterns will be implemented here.</p>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                            except Exception as e:
-                                st.error(f"AI analysis failed: {str(e)}")
         
         with tab3:
             st.subheader("🔍 Detailed Statistical Analysis")
@@ -2128,14 +1667,18 @@ def main():
                         
                         st.success("✅ Enhanced options strategy analysis complete!")
                         
-                        # Optional AI Analysis for Options Strategy
-                        if enable_ai_analysis and LLM_AVAILABLE:
-                            st.markdown("---")
-                            st.markdown("### 🤖 AI Options Strategy Analysis")
+                        # Automatic LLM Analysis - runs immediately after strategy completion
+                        if LLM_AVAILABLE:
+                            # Check for OpenAI API key
+                            api_key_available = bool(os.getenv('OPENAI_API_KEY'))
                             
-                            if st.button("🧠 Generate AI Options Analysis", key="options_ai_btn"):
-                                with st.spinner("🤖 AI analyzing options strategy..."):
+                            if api_key_available:
+                                st.markdown("---")
+                                st.markdown("### 🤖 AI-Powered Professional Analysis")
+                                
+                                with st.spinner("🤖 AI is analyzing your options strategy..."):
                                     try:
+                                        # Get LLM analyzer
                                         llm_analyzer = get_llm_analyzer()
                                         
                                         if llm_analyzer is not None:
@@ -2146,10 +1689,10 @@ def main():
                                                     latest_vix, condition, trade_approved
                                                 )
                                             
-                                            # Prepare confidence levels data  
+                                            # Prepare confidence levels data
                                             confidence_data_for_llm = format_confidence_levels_for_llm(conf_data)
                                             
-                                            # Generate LLM analysis
+                                            # Generate LLM analysis automatically
                                             llm_result = llm_analyzer.analyze_options_strategy(
                                                 ticker=strategy_ticker,
                                                 current_price=current_price,
@@ -2162,6 +1705,7 @@ def main():
                                             )
                                             
                                             if llm_result['llm_analysis']['success']:
+                                                # Display AI analysis with modern styling at the top
                                                 st.markdown("""
                                                 <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); 
                                                             padding: 2rem; border-radius: 16px; margin: 1rem 0; 
@@ -2172,9 +1716,12 @@ def main():
                                                 </div>
                                                 """, unsafe_allow_html=True)
                                                 
-                                                st.markdown(llm_result['llm_analysis']['analysis'])
+                                                # Display the AI analysis
+                                                ai_analysis = llm_result['llm_analysis']['analysis']
+                                                st.markdown(ai_analysis)
                                                 
-                                                with st.expander("📊 Analysis Details"):
+                                                # Show analysis metadata in an expander
+                                                with st.expander("📊 Analysis Metadata"):
                                                     col1, col2, col3 = st.columns(3)
                                                     with col1:
                                                         st.metric("Tokens Used", llm_result['llm_analysis']['tokens_used'])
@@ -2185,12 +1732,40 @@ def main():
                                                                 datetime.fromisoformat(llm_result['llm_analysis']['timestamp']).strftime("%H:%M:%S"))
                                                 
                                                 st.success("✅ AI analysis complete!")
+                                            
                                             else:
                                                 st.warning(f"⚠️ AI analysis failed: {llm_result['llm_analysis']['error']}")
+                                        
                                         else:
                                             st.warning("⚠️ Failed to initialize AI analyzer")
+                                            
                                     except Exception as e:
-                                        st.error(f"❌ AI analysis error: {str(e)}")
+                                        st.warning(f"⚠️ AI analysis error: {str(e)}")
+                            
+                            else:
+                                # Show setup instructions for missing API key
+                                st.markdown("---")
+                                st.markdown("### 🤖 AI Analysis Available")
+                                st.info("💡 **Set up your OpenAI API key to unlock professional AI trading analysis!**")
+                                
+                                with st.expander("🔑 Quick Setup Instructions"):
+                                    st.markdown("""
+                                    **To enable automatic AI analysis:**
+                                    1. Get an OpenAI API key from https://platform.openai.com/api-keys
+                                    2. Set it as an environment variable: `OPENAI_API_KEY=your-key-here`
+                                    3. **Or** create a `.env` file with: `OPENAI_API_KEY=your-key-here`
+                                    4. Restart the application
+                                    
+                                    **Features you'll unlock:**
+                                    - 🧠 **Executive Summary**: Overall strategy assessment
+                                    - 📋 **Risk Management**: Position sizing and stop-loss guidance  
+                                    - 🎯 **Entry/Exit Criteria**: Specific trading actions
+                                    - 📊 **Market Conditions**: VIX impact and timing analysis
+                                    """)
+                        
+                        else:
+                            st.markdown("---")
+                            st.info("💡 **Note**: Install OpenAI package to enable automatic AI-powered analysis and recommendations.")
                         
                     else:
                         if strategy_timeframe == 'weekly':
@@ -2205,11 +1780,9 @@ def main():
                     import traceback
                     st.code(traceback.format_exc())
         
-        
-        with tab7:
-            st.subheader("📐 Advanced Put Spread Analysis")
-            
-            if PUT_SPREAD_AVAILABLE:
+        # Add the new Put Spread Analysis tab (tab7)
+        if PUT_SPREAD_AVAILABLE:
+            with st.expander("📐 Advanced Put Spread Analysis (Click to expand)", expanded=False):
                 st.subheader("🏗️ Black-Scholes Put Spread Probability Analysis")
                 
                 st.markdown("""
@@ -2338,234 +1911,41 @@ def main():
                         if spread_results and spread_results['scenarios']:
                             st.success("✅ Put spread analysis complete!")
                             
-                            # Display comprehensive Black-Scholes parameters
-                            st.markdown("### 📊 Black-Scholes Analysis Parameters")
-                            
-                            # Create a beautiful parameters display with mathematical notation
-                            st.markdown("""
-                            <div style="background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); 
-                                        padding: 1.5rem; border-radius: 12px; margin: 1rem 0; 
-                                        border-left: 4px solid var(--primary-color); box-shadow: var(--shadow-sm);">
-                                <h4 style="color: var(--primary-color); margin: 0 0 1rem 0; font-weight: 700;">
-                                    🧮 Mathematical Variables Used in Black-Scholes Calculations
-                                </h4>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            
-                            # Extract values for current spread analysis
-                            current_price = spread_results['current_price']
-                            time_to_expiry_years = spread_results['time_to_expiry_days'] / 365.25
-                            volatility = spread_results['volatility']
-                            risk_free_rate = spread_results['risk_free_rate']
-                            dividend_yield = spread_results.get('dividend_yield', 0.0)  # Default to 0 if not available
-                            
-                            # Get example strikes from first scenario
-                            if spread_results['scenarios']:
-                                example_scenario = spread_results['scenarios'][0]
-                                short_strike = example_scenario['short_strike']
-                                if example_scenario['spreads']:
-                                    long_strike = example_scenario['spreads'][0]['long_strike']
-                                else:
-                                    long_strike = short_strike - 5  # Default example
-                            else:
-                                short_strike = current_price * 0.95
-                                long_strike = current_price * 0.90
-                            
-                            # Display parameters in organized sections
-                            st.markdown("#### 🎯 Core Market Variables")
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                st.markdown(f"""
-                                **S = Current Stock Price**
-                                - **Value**: {format_currency(current_price)}
-                                - **Description**: Underlying asset price
-                                - **Usage**: Base for all calculations
-                                """)
-                            
-                            with col2:
-                                st.markdown(f"""
-                                **σ = Implied Volatility**
-                                - **Value**: {format_percentage(volatility)}
-                                - **Description**: Expected price volatility
-                                - **Usage**: Measures uncertainty in price movement
-                                """)
-                            
-                            with col3:
-                                st.markdown(f"""
-                                **T = Time to Expiration**
-                                - **Value**: {time_to_expiry_years:.4f} years ({spread_results['time_to_expiry_days']:.1f} days)
-                                - **Description**: Time until option expires
-                                - **Usage**: Time decay factor in pricing
-                                """)
-                            
-                            st.markdown("#### 📈 Strike Price Variables")
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.markdown(f"""
-                                **A = Lower Strike Price (Long PUT)**
-                                - **Value**: {format_currency(long_strike)}
-                                - **Description**: Strike of PUT we BUY
-                                - **Usage**: Provides downside protection
-                                """)
-                            
-                            with col2:
-                                st.markdown(f"""
-                                **B = Higher Strike Price (Short PUT)**
-                                - **Value**: {format_currency(short_strike)}
-                                - **Description**: Strike of PUT we SELL
-                                - **Usage**: Generates premium income
-                                """)
-                            
-                            st.markdown("#### 💰 Economic Variables")
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.markdown(f"""
-                                **r = Risk-free Interest Rate**
-                                - **Value**: {format_percentage(risk_free_rate)}
-                                - **Description**: Treasury rate for discounting
-                                - **Usage**: Present value calculations
-                                """)
-                            
-                            with col2:
-                                st.markdown(f"""
-                                **q = Dividend Yield**
-                                - **Value**: {format_percentage(dividend_yield)}
-                                - **Description**: Expected dividend payments
-                                - **Usage**: Adjusts for dividend impact
-                                """)
-                            
-                            st.markdown("#### 🔢 Mathematical Functions")
-                            st.markdown("""
-                            **N() = Cumulative Normal Distribution Function**
-                            - **Description**: Standard normal cumulative distribution
-                            - **Usage**: Converts Z-scores to probabilities
-                            - **Formula**: ∫_{-∞}^{x} (1/√2π) * e^(-t²/2) dt
-                            """)
-                            
-                            # Show the actual Black-Scholes formulas being used
-                            st.markdown("#### 📝 Black-Scholes Formulas Used")
-                            
-                            # Use proper markdown formatting instead of HTML
-                            st.markdown("""
-                            **Probability of Profit Formula:**
-                            ```
-                            P(profit) = N((ln(S/B) + (r-q+σ²/2)T) / (σ√T)) - N((ln(S/A) + (r-q+σ²/2)T) / (σ√T))
-                            ```
-                            
-                            **Probability of Touching (POT) Formula:**
-                            ```
-                            POT = 2 × N((|ln(S/B)| - (r-q-σ²/2)T) / (σ√T))
-                            ```
-                            
-                            Where:
-                            - **S** = Current stock price
-                            - **A** = Lower strike (long put)
-                            - **B** = Higher strike (short put)  
-                            - **r** = Risk-free rate
-                            - **q** = Dividend yield
-                            - **σ** = Implied volatility
-                            - **T** = Time to expiration
-                            - **N()** = Cumulative normal distribution
-                            """)
-                            
-                            # Options data source information
-                            if spread_results['options_data_available']:
-                                st.success("✅ **Data Source**: Real options chain data used for implied volatility")
-                            else:
-                                st.warning("⚠️ **Data Source**: Using ATR-based volatility estimate (options chain unavailable)")
-                            
-                            # Summary metrics in a clean format
-                            st.markdown("#### 📊 Quick Reference Summary")
+                            # Display key parameters
+                            st.markdown("### 📊 Analysis Parameters")
                             col1, col2, col3, col4 = st.columns(4)
                             
                             with col1:
-                                st.metric("📈 Current Price (S)", format_currency(current_price))
+                                st.metric("Current Price", format_currency(spread_results['current_price']))
                             with col2:
-                                st.metric("⏰ Time to Expiry (T)", f"{spread_results['time_to_expiry_days']:.1f} days")
+                                st.metric("Time to Expiry", f"{spread_results['time_to_expiry_days']:.1f} days")
                             with col3:
-                                st.metric("📊 Volatility (σ)", format_percentage(volatility))
+                                st.metric("Implied Volatility", format_percentage(spread_results['volatility']))
                             with col4:
-                                st.metric("💰 Risk-free Rate (r)", format_percentage(risk_free_rate))
+                                st.metric("Risk-free Rate", format_percentage(spread_results['risk_free_rate']))
                             
-                            # Enhanced POT Strike Price Analysis - Focus on probabilities
-                            st.markdown("### 🎯 POT Strike Price Analysis - Key Probability Levels")
+                            # Options data availability
+                            if spread_results['options_data_available']:
+                                st.success("✅ Real options chain data used for implied volatility")
+                            else:
+                                st.warning("⚠️ Using ATR-based volatility estimate (options chain unavailable)")
                             
-                            st.markdown("""
-                            <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); 
-                                        padding: 1.5rem; border-radius: 12px; margin: 1rem 0; 
-                                        border-left: 4px solid var(--secondary-color);">
-                                <h4 style="color: var(--secondary-color); margin: 0 0 1rem 0; font-weight: 700;">
-                                    🎯 Strike Prices for Specific POT Levels
-                                </h4>
-                                <p style="margin: 0; color: var(--text-secondary); font-size: 1rem;">
-                                    The table below shows the exact strike prices needed to achieve your target POT percentages.
-                                    This is the core probability analysis for PUT selling strategies.
-                                </p>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            # POT Analysis Table
+                            st.markdown("### 🎯 Probability of Touching (POT) Analysis")
                             
-                            # Create enhanced POT table focused on strike prices
                             pot_data = []
                             for scenario in spread_results['scenarios']:
-                                target_pot_pct = scenario['target_pot'] * 100
-                                actual_pot_pct = scenario['actual_pot'] * 100
-                                strike_price = scenario['short_strike']
-                                distance_dollars = scenario['distance_from_current']
-                                distance_pct = scenario['distance_pct']
-                                
-                                # Determine safety level based on distance
-                                if distance_pct > 5:
-                                    safety = "🟢 VERY SAFE"
-                                elif distance_pct > 3:
-                                    safety = "🟡 SAFE"
-                                elif distance_pct > 2:
-                                    safety = "🟠 MODERATE"
-                                else:
-                                    safety = "🔴 RISKY"
-                                
                                 pot_data.append({
-                                    'Target POT %': f"{target_pot_pct:.1f}%",
-                                    'Strike Price': format_currency(strike_price),
-                                    'Actual POT %': f"{actual_pot_pct:.2f}%",
-                                    'Distance from Current': format_currency(distance_dollars),
-                                    'Distance %': f"{distance_pct:.1f}%",
-                                    'Safety Level': safety,
-                                    'Recommendation': 'SELL PUT' if distance_pct > 2 else 'AVOID'
+                                    'Target POT': format_percentage(scenario['target_pot']),
+                                    'Actual POT': format_percentage(scenario['actual_pot']),
+                                    'Short Strike': format_currency(scenario['short_strike']),
+                                    'Distance': format_currency(scenario['distance_from_current']),
+                                    'Distance %': f"{scenario['distance_pct']:.1f}%",
+                                    'Risk Level': 'LOW' if scenario['distance_pct'] > 5 else 'MEDIUM' if scenario['distance_pct'] > 2 else 'HIGH'
                                 })
                             
                             pot_df = pd.DataFrame(pot_data)
                             st.dataframe(pot_df, use_container_width=True)
-                            
-                            # Add summary of key POT levels
-                            st.markdown("#### 📊 Key POT Levels Summary")
-                            
-                            # Create columns for key POT levels
-                            if len(spread_results['scenarios']) >= 5:
-                                col1, col2, col3, col4, col5 = st.columns(5)
-                                
-                                for i, scenario in enumerate(spread_results['scenarios'][:5]):
-                                    target_pct = scenario['target_pot'] * 100
-                                    strike = scenario['short_strike']
-                                    distance_pct = scenario['distance_pct']
-                                    
-                                    with [col1, col2, col3, col4, col5][i]:
-                                        st.metric(
-                                            f"{target_pct:.1f}% POT",
-                                            format_currency(strike),
-                                            f"{distance_pct:.1f}% away"
-                                        )
-                            
-                            # Explanation of POT significance
-                            st.markdown("""
-                            **💡 POT Analysis Explanation:**
-                            - **POT %** = Probability the stock will touch this strike price before expiration
-                            - **Lower POT %** = Safer strike (less likely to be touched)
-                            - **Higher Distance %** = More conservative strike selection
-                            - **Recommendation** = Based on probability and distance analysis
-                            """)
                             
                             # Spread Analysis for Best Scenarios
                             st.markdown("### 📈 Put Spread Probability of Profit Analysis")
@@ -2628,9 +2008,8 @@ def main():
                         st.error(f"❌ Put spread analysis failed: {str(e)}")
                         import traceback
                         st.code(traceback.format_exc())
-                
-                else:
-                    st.warning("⚠️ Put Spread Analysis module not available. Please ensure put_spread_analysis.py is properly installed.")
+        else:
+            st.warning("⚠️ Put Spread Analysis module not available. Please ensure put_spread_analysis.py is properly installed.")
     
     else:
         # No analysis run yet - show standalone Options Strategy
