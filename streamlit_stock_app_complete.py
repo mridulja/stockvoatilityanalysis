@@ -105,6 +105,12 @@ try:
 except ImportError:
     TAB3_MODULAR = False
 
+try:
+    from tabs.tab4_comparison import render_comparison_tab
+    TAB4_MODULAR = True
+except ImportError:
+    TAB4_MODULAR = False
+
 # Fallback functions for Put Spread Analysis
 def get_same_day_expiry():
     """Fallback function for same day expiry"""
@@ -1084,21 +1090,28 @@ def main():
                 st.info("Please ensure tabs/tab3_detailed_stats.py is available for full functionality.")
         
         with tab4:
-            st.subheader("⚖️ Multi-Ticker Comparison")
-            
-            if len(session_tickers) > 1:
-                comparison_metric = st.selectbox(
-                    "Select metric to compare:",
-                    ['atr', 'volatility'],
-                    format_func=lambda x: {'atr': 'Average True Range (ATR)', 'volatility': 'Standard Deviation'}[x],
-                    key="comparison_metric"
-                )
-                
-                comparison_chart = create_comparison_chart(results, comparison_metric)
-                if comparison_chart:
-                    st.plotly_chart(comparison_chart, use_container_width=True)
+            # Use modular Tab 4 if available, otherwise fallback to original
+            if TAB4_MODULAR:
+                render_comparison_tab(results, vix_data, session_tickers)
             else:
-                st.info("Please select multiple tickers for comparison analysis")
+                st.warning("⚠️ Modular Tab 4 not available. Using fallback implementation.")
+                st.subheader("⚖️ Multi-Ticker Comparison (Fallback)")
+                
+                if len(session_tickers) > 1:
+                    comparison_metric = st.selectbox(
+                        "Select metric to compare:",
+                        ['atr', 'volatility'],
+                        format_func=lambda x: {'atr': 'Average True Range (ATR)', 'volatility': 'Standard Deviation'}[x],
+                        key="comparison_metric"
+                    )
+                    
+                    comparison_chart = create_comparison_chart(results, comparison_metric)
+                    if comparison_chart:
+                        st.plotly_chart(comparison_chart, use_container_width=True)
+                else:
+                    st.info("Please select multiple tickers for comparison analysis")
+                
+                st.info("Please ensure tabs/tab4_comparison.py is available for full functionality.")
         
         with tab5:
             st.subheader("📉 VIX Market Condition Analysis")

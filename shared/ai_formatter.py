@@ -307,8 +307,9 @@ def display_ai_setup_instructions(analysis_type="Analysis"):
 TAB_COLORS = {
     "technical": "#0ea5e9",      # Blue for technical analysis
     "statistical": "#6366f1",    # Indigo for statistical analysis  
+    "comparison": "#10b981",     # Green for comparison analysis
     "options": "#8b5cf6",        # Purple for options analysis
-    "sentiment": "#10b981",      # Green for sentiment analysis
+    "sentiment": "#059669",      # Emerald for sentiment analysis
     "macro": "#f59e0b",          # Amber for macro analysis
     "risk": "#ef4444",           # Red for risk analysis
     "default": "#6366f1"         # Default indigo
@@ -323,6 +324,8 @@ def get_tab_color(analysis_type):
         return TAB_COLORS["technical"]
     elif "statistical" in analysis_lower or "stats" in analysis_lower:
         return TAB_COLORS["statistical"]
+    elif "comparison" in analysis_lower or "comparative" in analysis_lower:
+        return TAB_COLORS["comparison"]
     elif "option" in analysis_lower:
         return TAB_COLORS["options"]
     elif "sentiment" in analysis_lower:
