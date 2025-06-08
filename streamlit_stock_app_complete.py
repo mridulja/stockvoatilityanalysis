@@ -117,6 +117,12 @@ try:
 except ImportError:
     TAB5_MODULAR = False
 
+try:
+    from tabs.tab6_options_strategy import render_options_strategy_tab
+    TAB6_MODULAR = True
+except ImportError:
+    TAB6_MODULAR = False
+
 # Fallback functions for Put Spread Analysis
 def get_same_day_expiry():
     """Fallback function for same day expiry"""
@@ -1157,21 +1163,28 @@ def main():
                 st.info("Please ensure tabs/tab5_vix_analysis.py is available for full functionality.")
         
         with tab6:
-            st.subheader("🎯 Advanced Options Strategy")
-            
-            strategy_ticker = st.selectbox("Select ticker for options:", session_tickers, key="strategy_ticker")
-            
-            if strategy_ticker in results:
-                current_price = get_current_price(strategy_ticker)
+            # Use modular Tab 6 if available, otherwise fallback to original
+            if TAB6_MODULAR:
+                render_options_strategy_tab(results, vix_data, session_tickers)
+            else:
+                st.warning("⚠️ Modular Tab 6 not available. Using fallback implementation.")
+                st.subheader("🎯 Advanced Options Strategy (Fallback)")
                 
-                if current_price:
-                    st.markdown(f"### 📊 Options Analysis for {strategy_ticker}")
-                    st.markdown(f"**Current Price**: ${current_price:.2f}")
+                strategy_ticker = st.selectbox("Select ticker for options:", session_tickers, key="strategy_ticker")
+                
+                if strategy_ticker in results:
+                    current_price = get_current_price(strategy_ticker)
                     
-                    st.success("✅ Options strategy framework ready")
-                    st.info("📊 Advanced probability calculations can be implemented here")
-                else:
-                    st.error(f"Could not fetch current price for {strategy_ticker}")
+                    if current_price:
+                        st.markdown(f"### 📊 Options Analysis for {strategy_ticker}")
+                        st.markdown(f"**Current Price**: ${current_price:.2f}")
+                        
+                        st.success("✅ Options strategy framework ready")
+                        st.info("📊 Advanced probability calculations can be implemented here")
+                    else:
+                        st.error(f"Could not fetch current price for {strategy_ticker}")
+                
+                st.info("Please ensure tabs/tab6_options_strategy.py is available for full functionality.")
         
         with tab7:
             st.subheader("📐 Advanced Put Spread Analysis")
