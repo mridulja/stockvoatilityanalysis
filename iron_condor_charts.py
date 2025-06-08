@@ -24,104 +24,265 @@ import pandas as pd
 import numpy as np
 
 def create_iron_condor_pnl_chart(strategy, current_price, price_range_pct=0.30):
-    """Create interactive Iron Condor P&L diagram"""
+    """Create clean Iron Condor P&L diagram with minimal text overlap"""
     try:
-        # Price range for analysis
-        price_min = current_price * (1 - price_range_pct)
-        price_max = current_price * (1 + price_range_pct)
-        prices = np.linspace(price_min, price_max, 100)
+        # Extract strategy parameters
+        call_short = strategy.get('call_short', 0)
+        call_long = strategy.get('call_long', 0)
+        put_short = strategy.get('put_short', 0)
+        put_long = strategy.get('put_long', 0)
+        total_credit = strategy.get('total_credit', 0)
         
-        # Calculate P&L for each price
+        if not all([call_short, call_long, put_short, put_long, total_credit]):
+            return None
+        
+        # Calculate key levels
+        max_profit = total_credit * 100
+        max_loss = (strategy.get('wing_width', 0) - total_credit) * 100
+        breakeven_lower = put_short - total_credit
+        breakeven_upper = call_short + total_credit
+        
+        # Create price range for P&L calculation
+        price_range_dollars = current_price * price_range_pct
+        price_min = current_price - price_range_dollars
+        price_max = current_price + price_range_dollars
+        
+        # Ensure we cover all critical points
+        critical_points = [put_long, put_short, breakeven_lower, current_price, 
+                          breakeven_upper, call_short, call_long]
+        price_min = min(price_min, min(critical_points) - 10)
+        price_max = max(price_max, max(critical_points) + 10)
+        
+        # Generate price points with higher density around critical areas
+        price_points = []
+        
+        # Add dense points around critical areas
+        for critical in critical_points:
+            local_range = np.linspace(critical - 5, critical + 5, 20)
+            price_points.extend(local_range)
+        
+        # Add broader range points
+        broad_range = np.linspace(price_min, price_max, 100)
+        price_points.extend(broad_range)
+        
+        # Remove duplicates and sort
+        price_points = sorted(list(set(price_points)))
+        price_array = np.array(price_points)
+        
+        # Calculate P&L for each price point
         pnl_values = []
-        for price in prices:
-            if price <= strategy['put_long']:
-                # Max loss on put side
-                pnl = strategy['total_credit'] - strategy['put_width']
-            elif price <= strategy['put_short']:
-                # Put spread in the money
-                pnl = strategy['total_credit'] - (strategy['put_short'] - price)
-            elif price <= strategy['call_short']:
-                # Between short strikes - max profit zone
-                pnl = strategy['total_credit']
-            elif price <= strategy['call_long']:
-                # Call spread in the money
-                pnl = strategy['total_credit'] - (price - strategy['call_short'])
-            else:
-                # Max loss on call side
-                pnl = strategy['total_credit'] - strategy['call_width']
-            
-            pnl_values.append(pnl * 100)  # Convert to dollars
         
+        for price in price_array:
+            # Call spread P&L: short call - long call
+            if price <= call_short:
+                call_pnl = 0  # Both expire worthless
+            elif price <= call_long:
+                call_pnl = (price - call_short) * 100  # Short call ITM, long OTM
+            else:
+                call_pnl = (call_long - call_short) * 100  # Both ITM, spread at max loss
+            
+            # Put spread P&L: short put - long put
+            if price >= put_short:
+                put_pnl = 0  # Both expire worthless
+            elif price >= put_long:
+                put_pnl = (put_short - price) * 100  # Short put ITM, long OTM
+            else:
+                put_pnl = (put_short - put_long) * 100  # Both ITM, spread at max loss
+            
+            # Total P&L = Credit received + Call spread P&L + Put spread P&L
+            total_pnl = max_profit + call_pnl + put_pnl
+            pnl_values.append(total_pnl)
+        
+        # Create the plot with better layout
         fig = go.Figure()
         
-        # Main P&L line
-        fig.add_trace(go.Scatter(
-            x=prices,
-            y=pnl_values,
-            mode='lines',
-            name='Iron Condor P&L',
-            line=dict(color='#6366f1', width=4),
-            hovertemplate='Price: $%{x:.2f}<br>P&L: $%{y:.2f}<extra></extra>'
-        ))
+        # Add P&L line with profit/loss color coding
+        profit_mask = np.array(pnl_values) > 0
+        loss_mask = np.array(pnl_values) < 0
         
-        # Add breakeven lines
-        fig.add_vline(
-            x=strategy['lower_breakeven'], 
-            line_dash="dash", 
-            line_color="#ef4444",
-            annotation_text=f"Lower BE: ${strategy['lower_breakeven']:.2f}"
-        )
-        fig.add_vline(
-            x=strategy['upper_breakeven'], 
-            line_dash="dash", 
-            line_color="#ef4444",
-            annotation_text=f"Upper BE: ${strategy['upper_breakeven']:.2f}"
-        )
+        # Profit zone (green)
+        profit_prices = price_array[profit_mask]
+        profit_pnl = np.array(pnl_values)[profit_mask]
         
+        if len(profit_prices) > 0:
+            fig.add_trace(
+                go.Scatter(
+                    x=profit_prices,
+                    y=profit_pnl,
+                    mode='lines',
+                    name='Profit Zone',
+                    line=dict(color='green', width=4),
+                    fill='tonexty',
+                    fillcolor='rgba(0, 255, 0, 0.2)'
+                ))
+        
+        # Loss zone (red)
+        loss_prices = price_array[loss_mask]
+        loss_pnl = np.array(pnl_values)[loss_mask]
+        
+        if len(loss_prices) > 0:
+            fig.add_trace(
+                go.Scatter(
+                    x=loss_prices,
+                    y=loss_pnl,
+                    mode='lines',
+                    name='Loss Zone',
+                    line=dict(color='red', width=4),
+                    fill='tonexty',
+                    fillcolor='rgba(255, 0, 0, 0.2)'
+                ))
+        
+        # Add full P&L line for continuity
+        fig.add_trace(
+            go.Scatter(
+                x=price_array,
+                y=pnl_values,
+                mode='lines',
+                name='Iron Condor P&L',
+                line=dict(color='blue', width=3),
+                showlegend=False
+            ))
+        
+        # Add key vertical lines with minimal annotations
         # Current price
         fig.add_vline(
-            x=current_price, 
-            line_dash="dot", 
-            line_color="#10b981",
-            annotation_text=f"Current: ${current_price:.2f}"
+            x=current_price,
+            line_dash="solid",
+            line_color="black",
+            line_width=3,
+            annotation_text=f"Current: ${current_price:.0f}",
+            annotation_position="top"
         )
         
-        # Strike prices
-        for strike, label in [
-            (strategy['put_long'], 'Put Long'),
-            (strategy['put_short'], 'Put Short'),
-            (strategy['call_short'], 'Call Short'),
-            (strategy['call_long'], 'Call Long')
-        ]:
-            fig.add_vline(
-                x=strike,
-                line_dash="dashdot",
-                line_color="#8b5cf6",
-                opacity=0.7,
-                annotation_text=f"{label}: ${strike:.0f}"
-            )
-        
-        # Profit zone shading
-        fig.add_vrect(
-            x0=strategy['lower_breakeven'],
-            x1=strategy['upper_breakeven'],
-            fillcolor="green",
-            opacity=0.1,
-            layer="below",
-            line_width=0,
-            annotation_text="Profit Zone"
+        # Breakevens
+        fig.add_vline(
+            x=breakeven_lower,
+            line_dash="dash",
+            line_color="orange",
+            annotation_text=f"BE: ${breakeven_lower:.0f}",
+            annotation_position="bottom left"
         )
         
-        # Zero line
-        fig.add_hline(y=0, line_dash="solid", line_color="#64748b", opacity=0.5)
+        fig.add_vline(
+            x=breakeven_upper,
+            line_dash="dash",
+            line_color="orange",
+            annotation_text=f"BE: ${breakeven_upper:.0f}",
+            annotation_position="bottom right"
+        )
         
+        # Strike prices - minimal annotations
+        fig.add_vline(x=put_long, line_dash="dot", line_color="gray", opacity=0.7)
+        fig.add_vline(x=put_short, line_dash="dot", line_color="red", opacity=0.7)
+        fig.add_vline(x=call_short, line_dash="dot", line_color="red", opacity=0.7)
+        fig.add_vline(x=call_long, line_dash="dot", line_color="gray", opacity=0.7)
+        
+        # Add horizontal lines for max profit/loss
+        fig.add_hline(
+            y=max_profit,
+            line_dash="dash",
+            line_color="green",
+            annotation_text=f"Max Profit: ${max_profit:.0f}",
+            annotation_position="right"
+        )
+        
+        fig.add_hline(
+            y=-max_loss,
+            line_dash="dash",
+            line_color="red",
+            annotation_text=f"Max Loss: ${max_loss:.0f}",
+            annotation_position="right"
+        )
+        
+        # Add zero line
+        fig.add_hline(y=0, line_dash="solid", line_color="gray", line_width=1, opacity=0.5)
+        
+        # Clean annotations for strikes (positioned to avoid overlap)
+        fig.add_annotation(
+            x=put_long, y=max_profit * 0.8,
+            text=f"Long Put<br>${put_long:.0f}",
+            showarrow=True,
+            arrowhead=2,
+            arrowcolor="gray",
+            font=dict(size=10, color="gray")
+        )
+        
+        fig.add_annotation(
+            x=put_short, y=max_profit * 0.5,
+            text=f"Short Put<br>${put_short:.0f}",
+            showarrow=True,
+            arrowhead=2,
+            arrowcolor="red",
+            font=dict(size=11, color="red")
+        )
+        
+        fig.add_annotation(
+            x=call_short, y=max_profit * 0.5,
+            text=f"Short Call<br>${call_short:.0f}",
+            showarrow=True,
+            arrowhead=2,
+            arrowcolor="red",
+            font=dict(size=11, color="red")
+        )
+        
+        fig.add_annotation(
+            x=call_long, y=max_profit * 0.8,
+            text=f"Long Call<br>${call_long:.0f}",
+            showarrow=True,
+            arrowhead=2,
+            arrowcolor="gray",
+            font=dict(size=10, color="gray")
+        )
+        
+        # Add profit zone highlight
+        profit_zone_width = breakeven_upper - breakeven_lower
+        profit_zone_pct = (profit_zone_width / current_price) * 100
+        
+        fig.add_annotation(
+            x=(breakeven_lower + breakeven_upper) / 2,
+            y=max_profit * 0.3,
+            text=f"PROFIT ZONE<br>${profit_zone_width:.0f} wide<br>({profit_zone_pct:.1f}% of stock price)",
+            showarrow=False,
+            bgcolor="rgba(0, 255, 0, 0.1)",
+            bordercolor="green",
+            borderwidth=2,
+            font=dict(size=12, color="green")
+        )
+        
+        # Update layout
         fig.update_layout(
-            title=f"Iron Condor P&L Diagram - {strategy['strategy_type']}",
+            title={
+                'text': f"Iron Condor P&L Diagram - {strategy.get('strategy_type', 'Standard')}",
+                'x': 0.5,
+                'font': {'size': 18}
+            },
             xaxis_title="Stock Price at Expiration ($)",
             yaxis_title="Profit/Loss ($)",
-            height=500,
+            height=600,
             showlegend=True,
-            hovermode='x unified'
+            legend=dict(
+                x=0.02,
+                y=0.98,
+                bgcolor="rgba(255, 255, 255, 0.8)",
+                bordercolor="gray",
+                borderwidth=1
+            ),
+            font=dict(size=12),
+            plot_bgcolor='white',
+            xaxis=dict(
+                gridcolor='lightgray',
+                gridwidth=1,
+                zeroline=True,
+                zerolinecolor='gray',
+                zerolinewidth=1
+            ),
+            yaxis=dict(
+                gridcolor='lightgray',
+                gridwidth=1,
+                zeroline=True,
+                zerolinecolor='gray',
+                zerolinewidth=2
+            )
         )
         
         return fig
@@ -131,179 +292,171 @@ def create_iron_condor_pnl_chart(strategy, current_price, price_range_pct=0.30):
         return None
 
 def create_time_decay_simulation_chart(simulation_df, strategy):
-    """Create comprehensive time decay simulation chart"""
+    """Create comprehensive time decay simulation chart with improved clarity"""
     try:
         if simulation_df.empty:
             return None
         
+        # Create subplots with better spacing and cleaner layout
         fig = make_subplots(
-            rows=3, cols=2,
+            rows=2, cols=2,
             subplot_titles=[
-                'Profit/Loss Over Time by Price Scenario',
-                'Theta Decay Analysis',
-                'Probability of Profit Remaining (POPrem)',
-                'Gamma Risk Over Time',
-                'Exit Strategy Analysis',
-                'Greeks Summary'
+                'P&L by Price Scenario Over Time',
+                'Theta Decay Analysis', 
+                'POPrem Evolution',
+                'Exit Rule Comparison'
             ],
             specs=[[{"secondary_y": False}, {"secondary_y": False}],
-                   [{"secondary_y": False}, {"secondary_y": False}],
                    [{"secondary_y": False}, {"secondary_y": False}]],
-            vertical_spacing=0.08
+            horizontal_spacing=0.12,
+            vertical_spacing=0.15
         )
         
-        # Color mapping for price scenarios
-        scenario_colors = {
-            '-15.0%': '#ef4444',
-            '-5.0%': '#f97316', 
-            '+0.0%': '#10b981',
-            '+5.0%': '#06b6d4',
-            '+15.0%': '#8b5cf6'
-        }
+        # Get unique scenarios and create cleaner color scheme
+        scenarios = simulation_df['price_scenario'].unique()
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
         
-        # 1. Profit/Loss Over Time
-        for scenario in simulation_df['price_scenario'].unique():
+        # 1. P&L Evolution Chart (Top Left) - Simplified
+        for i, scenario in enumerate(scenarios):
             scenario_data = simulation_df[simulation_df['price_scenario'] == scenario]
             
             fig.add_trace(
                 go.Scatter(
-                    x=scenario_data['day'],
+                    x=scenario_data['dte'],
                     y=scenario_data['profit_loss'],
-                    mode='lines+markers',
-                    name=f'P&L {scenario}',
-                    line=dict(color=scenario_colors.get(scenario, '#64748b'), width=3),
-                    marker=dict(size=4),
+                    mode='lines',
+                    name=f'{scenario}',
+                    line=dict(color=colors[i % len(colors)], width=3),
                     showlegend=True
                 ),
                 row=1, col=1
             )
         
-        # Add 21 DTE line
-        fig.add_vline(
-            x=strategy['dte'] - 21,
-            line_dash="dash",
-            line_color="#f59e0b",
-            annotation_text="21 DTE Exit",
-            row=1, col=1
-        )
+        # Add 21 DTE exit line - cleaner
+        fig.add_vline(x=21, line_dash="dash", line_color="red", 
+                      annotation_text="Rule A Exit", annotation_position="top",
+                      row=1, col=1)
         
-        # 2. Theta Decay Analysis
-        at_the_money_data = simulation_df[simulation_df['price_scenario'] == '+0.0%']
-        if not at_the_money_data.empty:
+        # 2. Theta Analysis (Top Right) - Simplified
+        at_money_data = simulation_df[simulation_df['price_scenario'] == '+0.0%']
+        if not at_money_data.empty:
             fig.add_trace(
                 go.Scatter(
-                    x=at_the_money_data['day'],
-                    y=at_the_money_data['theta_total'],
-                    mode='lines',
-                    name='Daily Theta',
-                    line=dict(color='#ef4444', width=3),
+                    x=at_money_data['dte'],
+                    y=at_money_data['theta_total'],
+                    mode='lines+markers',
+                    name='Net Theta',
+                    line=dict(color='#2ca02c', width=3),
+                    marker=dict(size=6),
                     showlegend=False
                 ),
                 row=1, col=2
             )
         
-        # 3. POPrem Analysis
-        if not at_the_money_data.empty:
+        # 3. POPrem Evolution (Bottom Left) - Simplified  
+        if not at_money_data.empty:
             fig.add_trace(
                 go.Scatter(
-                    x=at_the_money_data['day'],
-                    y=at_the_money_data['pop_remaining'] * 100,
+                    x=at_money_data['dte'],
+                    y=at_money_data['pop_remaining'] * 100,
                     mode='lines+markers',
-                    name='POP Remaining %',
-                    line=dict(color='#10b981', width=3),
+                    name='POPrem %',
+                    line=dict(color='#ff7f0e', width=3),
                     marker=dict(size=6),
                     showlegend=False
                 ),
                 row=2, col=1
             )
         
-        # 4. Gamma Risk
-        if not at_the_money_data.empty:
+        # 4. Exit Strategy Analysis (Bottom Right) - Simplified
+        rule_a_scenarios = []
+        rule_b_scenarios = []
+        
+        for scenario in scenarios:
+            scenario_data = simulation_df[simulation_df['price_scenario'] == scenario]
+            
+            # Rule A: Exit at 21 DTE or 50% profit
+            rule_a_data = scenario_data[scenario_data['dte'] >= 21]
+            if not rule_a_data.empty:
+                rule_a_exit = rule_a_data.iloc[-1]  # Last day before 21 DTE
+                rule_a_scenarios.append({
+                    'scenario': scenario,
+                    'profit': rule_a_exit['profit_loss'],
+                    'dte_exit': rule_a_exit['dte']
+                })
+            
+            # Rule B: Hold to expiry
+            rule_b_data = scenario_data[scenario_data['dte'] == 0]
+            if not rule_b_data.empty:
+                rule_b_exit = rule_b_data.iloc[0]
+                rule_b_scenarios.append({
+                    'scenario': scenario,
+                    'profit': rule_b_exit['profit_loss'],
+                    'dte_exit': 0
+                })
+        
+        # Plot exit comparison - cleaner bars
+        if rule_a_scenarios and rule_b_scenarios:
+            scenarios_list = [s['scenario'] for s in rule_a_scenarios]
+            rule_a_profits = [s['profit'] for s in rule_a_scenarios]
+            rule_b_profits = [s['profit'] for s in rule_b_scenarios]
+            
             fig.add_trace(
-                go.Scatter(
-                    x=at_the_money_data['day'],
-                    y=at_the_money_data['gamma_total'],
-                    mode='lines',
-                    name='Total Gamma',
-                    line=dict(color='#8b5cf6', width=3),
+                go.Bar(
+                    x=scenarios_list,
+                    y=rule_a_profits,
+                    name='Rule A (21 DTE)',
+                    marker_color='orange',
+                    opacity=0.8,
+                    showlegend=False
+                ),
+                row=2, col=2
+            )
+            
+            fig.add_trace(
+                go.Bar(
+                    x=scenarios_list,
+                    y=rule_b_profits,
+                    name='Rule B (Expiry)',
+                    marker_color='lightblue',
+                    opacity=0.8,
                     showlegend=False
                 ),
                 row=2, col=2
             )
         
-        # 5. Exit Strategy Comparison
-        rule_a_data = simulation_df[simulation_df['should_close_21_dte'] == True].groupby('price_scenario').first()
-        rule_b_data = simulation_df[simulation_df['dte'] == 0]
-        
-        exit_scenarios = rule_a_data.index.tolist()
-        rule_a_profits = rule_a_data['profit_loss'].tolist()
-        rule_b_profits = rule_b_data.groupby('price_scenario')['profit_loss'].first().reindex(exit_scenarios).tolist()
-        
-        fig.add_trace(
-            go.Bar(
-                x=exit_scenarios,
-                y=rule_a_profits,
-                name='21 DTE Exit',
-                marker_color='#f59e0b',
-                opacity=0.8,
-                showlegend=False
-            ),
-            row=3, col=1
-        )
-        
-        fig.add_trace(
-            go.Bar(
-                x=exit_scenarios,
-                y=rule_b_profits,
-                name='Hold to Expiry',
-                marker_color='#06b6d4',
-                opacity=0.8,
-                showlegend=False
-            ),
-            row=3, col=1
-        )
-        
-        # 6. Greeks Summary (current values)
-        current_data = simulation_df[simulation_df['day'] == 0]
-        if not current_data.empty:
-            greeks_summary = current_data.groupby('price_scenario').first()
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=greeks_summary.index,
-                    y=greeks_summary['theta_total'],
-                    mode='markers',
-                    name='Current Theta',
-                    marker=dict(size=12, color='#ef4444'),
-                    showlegend=False
-                ),
-                row=3, col=2
-            )
-        
-        # Update subplot titles and axes
-        fig.update_xaxes(title_text="Days from Entry", row=1, col=1)
-        fig.update_yaxes(title_text="P&L ($)", row=1, col=1)
-        
-        fig.update_xaxes(title_text="Days from Entry", row=1, col=2)
-        fig.update_yaxes(title_text="Theta ($/day)", row=1, col=2)
-        
-        fig.update_xaxes(title_text="Days from Entry", row=2, col=1)
-        fig.update_yaxes(title_text="POP Remaining (%)", row=2, col=1)
-        
-        fig.update_xaxes(title_text="Days from Entry", row=2, col=2)
-        fig.update_yaxes(title_text="Gamma", row=2, col=2)
-        
-        fig.update_xaxes(title_text="Price Scenario", row=3, col=1)
-        fig.update_yaxes(title_text="Exit P&L ($)", row=3, col=1)
-        
-        fig.update_xaxes(title_text="Price Scenario", row=3, col=2)
-        fig.update_yaxes(title_text="Current Theta", row=3, col=2)
-        
+        # Update layout with better spacing and cleaner formatting
         fig.update_layout(
-            title=f"Iron Condor Time Decay Simulation - {strategy['strategy_type']}",
-            height=900,
-            showlegend=True
+            title={
+                'text': f"Iron Condor Time Decay Simulation - {strategy.get('strategy_type', 'Standard')}",
+                'x': 0.5,
+                'font': {'size': 18}
+            },
+            height=700,
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                font=dict(size=10)
+            ),
+            font=dict(size=11)
         )
+        
+        # Update axes with cleaner labels and better formatting
+        fig.update_xaxes(title_text="Days to Expiry", row=1, col=1, title_font_size=12)
+        fig.update_yaxes(title_text="P&L ($)", row=1, col=1, title_font_size=12)
+        
+        fig.update_xaxes(title_text="Days to Expiry", row=1, col=2, title_font_size=12)
+        fig.update_yaxes(title_text="Theta ($)", row=1, col=2, title_font_size=12)
+        
+        fig.update_xaxes(title_text="Days to Expiry", row=2, col=1, title_font_size=12)
+        fig.update_yaxes(title_text="POPrem (%)", row=2, col=1, title_font_size=12)
+        
+        fig.update_xaxes(title_text="Price Scenario", row=2, col=2, title_font_size=12)
+        fig.update_yaxes(title_text="Exit P&L ($)", row=2, col=2, title_font_size=12)
         
         return fig
         
@@ -460,166 +613,329 @@ def create_exit_strategy_analysis_chart(exit_analysis):
         return None
 
 def create_technical_metrics_dashboard(strategy, current_price):
-    """Create comprehensive technical metrics dashboard"""
+    """Create comprehensive technical metrics dashboard with key performance indicators"""
     try:
+        print(f"Creating technical dashboard...")
+        print(f"Strategy keys available: {list(strategy.keys())}")
+        
+        # Extract key values with fallbacks and debugging
+        call_short = strategy.get('call_short', 0)
+        total_credit = strategy.get('total_credit', 0)
+        wing_width = strategy.get('wing_width', 5)
+        
+        print(f"Extracted values: call_short={call_short}, total_credit={total_credit}, wing_width={wing_width}")
+        
+        # Calculate metrics with fallbacks
+        try:
+            credit_ratio = (total_credit / wing_width) if wing_width > 0 else 0
+            max_profit = total_credit * 100
+            roc = (max_profit / (wing_width * 100 - max_profit)) * 100 if wing_width > 0 else 0
+            
+            print(f"Calculated: credit_ratio={credit_ratio:.1%}, max_profit=${max_profit}, roc={roc:.1f}%")
+        except Exception as calc_error:
+            print(f"Calculation error: {calc_error}")
+            credit_ratio = 0
+            max_profit = 0
+            roc = 0
+        
+        # Create subplots with mixed chart types
         fig = make_subplots(
             rows=2, cols=3,
             subplot_titles=[
-                'ROC & Risk Metrics',
+                'Credit Efficiency Gauge',
+                'Strategy Breakdown',
+                'Probability Metrics',
                 'Greeks Analysis',
-                'Profit Zone Analysis',
-                'Time Decay Progression',
-                'Credit Efficiency',
-                'Strategy Classification'
+                'Risk Metrics',
+                'P&L Profile'
             ],
             specs=[
-                [{"type": "bar"}, {"type": "bar"}, {"type": "scatter"}],
-                [{"type": "scatter"}, {"type": "indicator"}, {"type": "pie"}]
+                [{"type": "indicator"}, {"type": "xy"}, {"type": "indicator"}],
+                [{"type": "xy"}, {"type": "indicator"}, {"type": "xy"}]
+            ],
+            horizontal_spacing=0.12,
+            vertical_spacing=0.15
+        )
+        
+        # 1. Credit Efficiency Gauge (Top Left)
+        try:
+            fig.add_trace(
+                go.Indicator(
+                    mode="gauge+number+delta",
+                    value=credit_ratio * 100,  # Convert to percentage for display
+                    domain={'x': [0, 1], 'y': [0, 1]},
+                    title={'text': f"Credit Efficiency<br>{credit_ratio*100:.1f}¢ per $1"},
+                    delta={'reference': 33, 'suffix': '¢'},
+                    gauge={
+                        'axis': {'range': [None, 50], 'ticksuffix': '¢'},
+                        'bar': {'color': "#1f77b4"},
+                        'steps': [
+                            {'range': [0, 15], 'color': "#ffcccc"},
+                            {'range': [15, 33], 'color': "#ffffcc"},
+                            {'range': [33, 40], 'color': "#ccffcc"},
+                            {'range': [40, 50], 'color': "#ccffff"}
+                        ],
+                        'threshold': {
+                            'line': {'color': "red", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 33
+                        }
+                    }
+                ),
+                row=1, col=1
+            )
+        except Exception as gauge_error:
+            print(f"Gauge creation error: {gauge_error}")
+            # Fallback: Add a simple text annotation
+            fig.add_annotation(
+                x=0.16, y=0.72,
+                text=f"Credit Efficiency<br>{credit_ratio*100:.1f}¢ per $1",
+                showarrow=False,
+                font=dict(size=14),
+                xref="paper", yref="paper"
+            )
+        
+        # 2. Strategy Breakdown (Top Center)
+        try:
+            components = ['Max Profit', 'Max Loss', 'Credit', 'Wing Width']
+            values = [
+                strategy.get('max_profit', 0),
+                abs(strategy.get('max_loss', 0)),
+                strategy.get('total_credit', 0) * 100,
+                strategy.get('wing_width', 0) * 10  # Scale for visibility
+            ]
+            
+            fig.add_trace(
+                go.Bar(
+                    x=components,
+                    y=values,
+                    marker_color=['#10b981', '#ef4444', '#3b82f6', '#8b5cf6'],
+                    name='Strategy Components',
+                    showlegend=False
+                ),
+                row=1, col=2
+            )
+        except Exception as bar_error:
+            print(f"Bar chart error: {bar_error}")
+        
+        # 3. POP Gauge (Top Right)
+        try:
+            pop_value = strategy.get('pop_black_scholes', 0) * 100
+            fig.add_trace(
+                go.Indicator(
+                    mode="gauge+number",
+                    value=pop_value,
+                    domain={'x': [0, 1], 'y': [0, 1]},
+                    title={'text': "Probability of Profit"},
+                    gauge={
+                        'axis': {'range': [None, 100], 'ticksuffix': '%'},
+                        'bar': {'color': "#10b981"},
+                        'steps': [
+                            {'range': [0, 50], 'color': "#ffcccc"},
+                            {'range': [50, 70], 'color': "#ffffcc"},
+                            {'range': [70, 85], 'color': "#ccffcc"},
+                            {'range': [85, 100], 'color': "#ccffff"}
+                        ],
+                        'threshold': {
+                            'line': {'color': "green", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 70
+                        }
+                    }
+                ),
+                row=1, col=3
+            )
+        except Exception as pop_error:
+            print(f"POP gauge error: {pop_error}")
+        
+        # 4. Greeks Analysis (Bottom Left)
+        try:
+            greeks = ['Theta', 'Gamma', 'Vega', 'Delta']
+            greek_values = [
+                abs(strategy.get('net_theta', 0)),
+                abs(strategy.get('net_gamma', 0)) * 1000,  # Scale gamma
+                abs(strategy.get('net_vega', 0)),
+                abs(strategy.get('net_delta', 0))
+            ]
+            
+            fig.add_trace(
+                go.Bar(
+                    x=greeks,
+                    y=greek_values,
+                    marker_color='#f59e0b',
+                    name='Greeks',
+                    showlegend=False
+                ),
+                row=2, col=1
+            )
+        except Exception as greeks_error:
+            print(f"Greeks chart error: {greeks_error}")
+        
+        # 5. ROC Gauge (Bottom Center)
+        try:
+            fig.add_trace(
+                go.Indicator(
+                    mode="gauge+number",
+                    value=roc,
+                    domain={'x': [0, 1], 'y': [0, 1]},
+                    title={'text': "Return on Capital"},
+                    gauge={
+                        'axis': {'range': [None, 50], 'ticksuffix': '%'},
+                        'bar': {'color': "#8b5cf6"},
+                        'steps': [
+                            {'range': [0, 10], 'color': "#ffcccc"},
+                            {'range': [10, 15], 'color': "#ffffcc"},
+                            {'range': [15, 25], 'color': "#ccffcc"},
+                            {'range': [25, 50], 'color': "#ccffff"}
+                        ],
+                        'threshold': {
+                            'line': {'color': "blue", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 15
+                        }
+                    }
+                ),
+                row=2, col=2
+            )
+        except Exception as roc_error:
+            print(f"ROC gauge error: {roc_error}")
+        
+        # 6. P&L Profile (Bottom Right) - WITHOUT add_vline to avoid the error
+        try:
+            # Calculate P&L profile
+            max_profit = strategy.get('max_profit', 0)
+            max_loss = strategy.get('max_loss', 0)
+            breakeven_lower = strategy.get('lower_breakeven', current_price * 0.9)
+            breakeven_upper = strategy.get('upper_breakeven', current_price * 1.1)
+            
+            # Create price range around current price
+            price_range = np.linspace(current_price * 0.85, current_price * 1.15, 100)
+            pnl_values = []
+            
+            for price in price_range:
+                if breakeven_lower <= price <= breakeven_upper:
+                    pnl = max_profit
+                elif price < breakeven_lower:
+                    pnl = max_profit - (breakeven_lower - price) * 100
+                else:  # price > breakeven_upper
+                    pnl = max_profit - (price - breakeven_upper) * 100
+                
+                # Cap at max loss
+                pnl = max(pnl, -abs(max_loss))
+            
+                pnl_values.append(pnl)
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=price_range,
+                    y=pnl_values,
+                    mode='lines',
+                    fill='tonexty',
+                    fillcolor='rgba(0,255,0,0.3)',
+                    line=dict(color='blue', width=3),
+                    name='P&L Profile',
+                    showlegend=False
+                ),
+                row=2, col=3
+            )
+            
+            # Add current price as a scatter point instead of vline
+            current_pnl = max_profit if breakeven_lower <= current_price <= breakeven_upper else 0
+            fig.add_trace(
+                go.Scatter(
+                    x=[current_price],
+                    y=[current_pnl],
+                    mode='markers+text',
+                    text=[f"Current: ${current_price:.2f}"],
+                    textposition='top center',
+                    marker=dict(size=12, color='red', symbol='diamond'),
+                    name='Current Price',
+                    showlegend=False
+                ),
+                row=2, col=3
+            )
+            
+        except Exception as pnl_error:
+            print(f"P&L chart error: {pnl_error}")
+            # Fallback: show a simple message
+            fig.add_annotation(
+                x=0.83, y=0.25,
+                text="P&L Profile<br>Insufficient Data",
+                showarrow=False,
+                font=dict(size=14),
+                xref="paper", yref="paper"
+            )
+        
+        # Update layout with explanations
+        fig.update_layout(
+            title={
+                'text': f"Iron Condor Technical Dashboard - {strategy.get('strategy_type', 'Standard')}",
+                'x': 0.5,
+                'font': {'size': 18}
+            },
+            height=800,
+            showlegend=False,
+            font=dict(size=11),
+            annotations=[
+                # Add explanations as annotations
+                dict(
+                    text="Credit Efficiency: Higher is better<br>33¢+ per $1 = Bread & Butter Rule",
+                    x=0.16, y=0.45,
+                    xref="paper", yref="paper",
+                    font=dict(size=10, color="gray"),
+                    showarrow=False
+                ),
+                dict(
+                    text="POP: Probability of Profit<br>Higher % = Better odds",
+                    x=0.83, y=0.72,
+                    xref="paper", yref="paper",
+                    font=dict(size=10, color="gray"),
+                    showarrow=False
+                ),
+                dict(
+                    text="ROC: Return on Capital<br>15%+ is good target",
+                    x=0.83, y=0.28,
+                    xref="paper", yref="paper",
+                    font=dict(size=10, color="gray"),
+                    showarrow=False
+                )
             ]
         )
         
-        # 1. ROC & Risk Metrics
-        metrics_names = ['ROC %', 'Risk/Reward', 'Margin Req ($)']
-        metrics_values = [
-            strategy.get('roc_percent', 0),
-            strategy.get('risk_reward_ratio', 0),
-            strategy.get('margin_required', 0) / 100  # Scale down for display
-        ]
+        # Update axes
+        fig.update_xaxes(title_text="Strategy Component", row=1, col=2, title_font_size=12)
+        fig.update_yaxes(title_text="Value ($)", row=1, col=2, title_font_size=12)
         
-        fig.add_trace(
-            go.Bar(
-                x=metrics_names,
-                y=metrics_values,
-                marker_color=['#10b981', '#06b6d4', '#f59e0b'],
-                showlegend=False
-            ),
-            row=1, col=1
-        )
+        fig.update_xaxes(title_text="Greek", row=2, col=1, title_font_size=12)
+        fig.update_yaxes(title_text="Value", row=2, col=1, title_font_size=12)
         
-        # 2. Greeks Analysis
-        greeks_names = ['Theta/Day', 'Gamma', 'Vega']
-        greeks_values = [
-            abs(strategy.get('net_theta', 0)),
-            abs(strategy.get('net_gamma', 0)),
-            abs(strategy.get('net_vega', 0))
-        ]
+        fig.update_xaxes(title_text="Stock Price ($)", row=2, col=3, title_font_size=12)
+        fig.update_yaxes(title_text="P&L ($)", row=2, col=3, title_font_size=12)
         
-        fig.add_trace(
-            go.Bar(
-                x=greeks_names,
-                y=greeks_values,
-                marker_color=['#ef4444', '#8b5cf6', '#06b6d4'],
-                showlegend=False
-            ),
-            row=1, col=2
-        )
-        
-        # 3. Profit Zone Analysis
-        distance_from_current = [
-            strategy.get('breakeven_lower', 0) - current_price,
-            0,  # Current price
-            strategy.get('breakeven_upper', 0) - current_price
-        ]
-        price_labels = ['Lower BE', 'Current', 'Upper BE']
-        
-        fig.add_trace(
-            go.Scatter(
-                x=distance_from_current,
-                y=[1, 1, 1],
-                mode='markers+text',
-                text=price_labels,
-                textposition='top center',
-                marker=dict(size=[15, 20, 15], color=['red', 'green', 'red']),
-                showlegend=False
-            ),
-            row=1, col=3
-        )
-        
-        # 4. Time Decay Progression (estimate)
-        days = list(range(0, strategy.get('dte', 30) + 1, 5))
-        theta_decay = [strategy.get('theta_decay_daily', 0) * day for day in days]
-        
-        fig.add_trace(
-            go.Scatter(
-                x=days,
-                y=theta_decay,
-                mode='lines+markers',
-                name='Cumulative Theta',
-                line=dict(color='#ef4444', width=3),
-                showlegend=False
-            ),
-            row=2, col=1
-        )
-        
-        # 5. Credit Efficiency Gauge
-        credit_efficiency = strategy.get('credit_to_width_ratio', 0) * 100
-        
-        fig.add_trace(
-            go.Indicator(
-                mode="gauge+number+delta",
-                value=credit_efficiency,
-                domain={'x': [0, 1], 'y': [0, 1]},
-                title={'text': "Credit/Width %"},
-                delta={'reference': 33},  # 1/3 rule reference
-                gauge={
-                    'axis': {'range': [None, 50]},
-                    'bar': {'color': "darkblue"},
-                    'steps': [
-                        {'range': [0, 25], 'color': "lightgray"},
-                        {'range': [25, 33], 'color': "yellow"},
-                        {'range': [33, 50], 'color': "green"}
-                    ],
-                    'threshold': {
-                        'line': {'color': "red", 'width': 4},
-                        'thickness': 0.75,
-                        'value': 33
-                    }
-                }
-            ),
-            row=2, col=2
-        )
-        
-        # 6. Strategy Classification
-        strategy_breakdown = {
-            'Quality Score': 85 if strategy.get('pop_black_scholes', 0) > 0.7 else 65,
-            'Risk Level': 25 if strategy.get('gamma_risk', 0) < 0.1 else 75,
-            'Time Sensitivity': 60 if strategy.get('dte', 30) > 21 else 90
-        }
-        
-        fig.add_trace(
-            go.Pie(
-                labels=list(strategy_breakdown.keys()),
-                values=list(strategy_breakdown.values()),
-                hole=0.3,
-                showlegend=False
-            ),
-            row=2, col=3
-        )
-        
-        # Update layout
-        fig.update_xaxes(title_text="Metric", row=1, col=1)
-        fig.update_yaxes(title_text="Value", row=1, col=1)
-        
-        fig.update_xaxes(title_text="Greek", row=1, col=2)
-        fig.update_yaxes(title_text="Value", row=1, col=2)
-        
-        fig.update_xaxes(title_text="Distance from Current ($)", row=1, col=3)
-        fig.update_yaxes(title_text="", row=1, col=3, showticklabels=False)
-        
-        fig.update_xaxes(title_text="Days", row=2, col=1)
-        fig.update_yaxes(title_text="Cumulative Theta ($)", row=2, col=1)
-        
-        fig.update_layout(
-            title=f"Technical Metrics Dashboard - {strategy.get('strategy_type', 'Iron Condor')}",
-            height=700,
-            showlegend=False
-        )
-        
+        print(f"Dashboard created successfully!")
         return fig
         
     except Exception as e:
         print(f"Error creating technical metrics dashboard: {e}")
-        return None
+        import traceback
+        traceback.print_exc()
+        
+        # Return a simple fallback chart
+        fig = go.Figure()
+        fig.add_annotation(
+            x=0.5, y=0.5,
+            text=f"Technical Dashboard Error:<br>{str(e)}<br><br>Check console for details",
+            showarrow=False,
+            font=dict(size=16),
+            xref="paper", yref="paper"
+        )
+        fig.update_layout(
+            title="Technical Metrics Dashboard - Error",
+            height=400,
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False)
+        )
+        return fig
 
 def create_strategy_comparison_chart(analysis_results):
     """Create strategy comparison chart with enhanced metrics"""

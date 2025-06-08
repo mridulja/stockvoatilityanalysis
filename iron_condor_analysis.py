@@ -1,36 +1,28 @@
 """
-Iron Condor Trading Analysis Module - Enhanced with Technical Reference
+Iron Condor Options Strategy Analysis Module
 
-This module provides comprehensive Iron Condor strategy analysis with real-time options data,
-probability calculations, time decay simulation, exit rule analysis, and strategy variations 
-based on the Iron Condor Trading Playbook.
-
-Features:
+This module provides comprehensive analysis for Iron Condor strategies including:
 - Real-time options data from yfinance
-- Black-Scholes probability calculations with Greeks
-- Time decay simulation and profit/loss modeling
-- Exit rule analysis (21 DTE vs Hold to Expiry)
-- Comprehensive technical metrics (Theta, Gamma, ROC, POPrem)
-- Multiple strategy variations (Bread & Butter, Skewed, Chicken IC, etc.)
-- Trade management recommendations with decision analysis
+- Black-Scholes probability calculations
+- Multiple POP calculation methods (Delta, Credit/Width, Black-Scholes)
+- Strike selection algorithms
+- Greeks calculations
+- IV Rank assessment
+- Strategy classification (Bread & Butter, Big Boy, Chicken IC, Conservative)
 
 Author: AI Assistant
 Date: 2025
-Version: 2.0 - Enhanced with Technical Reference and Simulation
 """
 
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-from datetime import datetime, timedelta, date
+from datetime import datetime, date, timedelta
 from scipy import stats
 import warnings
 import math
 
-# Suppress warnings
+# Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
 
 class IronCondorAnalyzer:
@@ -602,6 +594,12 @@ class IronCondorAnalyzer:
             max_loss_put = put_width - put_credit
             max_loss = max(max_loss_call, max_loss_put)
             
+            # ROC Calculation - FIXED
+            max_profit_dollars = max_profit * 100
+            max_loss_dollars = max_loss * 100
+            margin_required = max_loss_dollars  # Margin = max loss
+            roc_percent = (max_profit_dollars / margin_required * 100) if margin_required > 0 else 0
+            
             # Breakevens
             upper_breakeven = call_short + total_credit
             lower_breakeven = put_short - total_credit
@@ -621,6 +619,29 @@ class IronCondorAnalyzer:
             put_delta = self.calculate_delta_approximation(
                 put_short, current_price, time_to_expiry, volatility, 'put'
             )
+            
+            # Calculate comprehensive Greeks - FIXED
+            call_short_greeks = self.calculate_greeks(call_short, current_price, time_to_expiry, volatility, 'call')
+            call_long_greeks = self.calculate_greeks(call_long, current_price, time_to_expiry, volatility, 'call')
+            put_short_greeks = self.calculate_greeks(put_short, current_price, time_to_expiry, volatility, 'put')
+            put_long_greeks = self.calculate_greeks(put_long, current_price, time_to_expiry, volatility, 'put')
+            
+            # Net Greeks for Iron Condor (short - long for each side)
+            net_call_theta = call_short_greeks['theta'] - call_long_greeks['theta']  # Sell - Buy
+            net_put_theta = put_short_greeks['theta'] - put_long_greeks['theta']    # Sell - Buy
+            net_theta = net_call_theta + net_put_theta  # Total daily theta
+            
+            net_call_gamma = call_short_greeks['gamma'] - call_long_greeks['gamma']
+            net_put_gamma = put_short_greeks['gamma'] - put_long_greeks['gamma']
+            net_gamma = net_call_gamma + net_put_gamma
+            
+            net_call_vega = call_short_greeks['vega'] - call_long_greeks['vega']
+            net_put_vega = put_short_greeks['vega'] - put_long_greeks['vega']
+            net_vega = net_call_vega + net_put_vega
+            
+            net_call_delta = call_short_greeks['delta'] - call_long_greeks['delta']
+            net_put_delta = put_short_greeks['delta'] - put_long_greeks['delta']
+            net_delta = net_call_delta + net_put_delta
             
             # POP calculations
             pop_delta = self.calculate_pop_delta_method(call_delta, put_delta)
@@ -657,7 +678,16 @@ class IronCondorAnalyzer:
                 'call_short': call_short,
                 'call_long': call_long,
                 'put_short': put_short,
-                'put_long': put_long
+                'put_long': put_long,
+                # Fixed ROC and Greeks calculations
+                'roc_percent': roc_percent,
+                'max_profit_dollars': max_profit_dollars,
+                'max_loss_dollars': max_loss_dollars,
+                'margin_required': margin_required,
+                'net_theta': net_theta,
+                'net_gamma': net_gamma,
+                'net_vega': net_vega,
+                'net_delta': net_delta
             }
             
         except Exception as e:
@@ -737,6 +767,7 @@ class IronCondorAnalyzer:
                         'max_profit': total_credit * 100,
                         'max_loss': (wing_width - total_credit) * 100,
                         'credit_to_width_ratio': total_credit / wing_width,
+                        'total_credit': total_credit,
                         'wing_width': wing_width,
                         'dte': dte
                     }
@@ -775,7 +806,6 @@ class IronCondorAnalyzer:
                         'put_long': put_long_strike,
                         'call_credit': call_credit,
                         'put_credit': put_credit,
-                        'total_credit': total_credit,
                         'dte': dte,
                         'expiry_date': expiry
                     })
@@ -827,23 +857,34 @@ class IronCondorAnalyzer:
             return None
     
     def classify_strategy(self, metrics, wing_width, target_delta, dte):
-        """Classify strategy type based on playbook rules"""
-        credit_width_ratio = metrics['total_credit'] / wing_width
-        
-        if credit_width_ratio >= 0.33:
-            if wing_width <= 5:
+        """Classify Iron Condor strategy type based on parameters"""
+        try:
+            # Use pre-calculated credit to width ratio
+            credit_width_ratio = metrics.get('credit_to_width_ratio', 0)
+            
+            # Bread & Butter: 1/3 width credit (33%+) with smaller wings
+            if credit_width_ratio >= 0.33 and wing_width <= 5:
                 return "Bread & Butter"
-            elif wing_width > 10:
+            
+            # Big Boy: Wide wings for higher POP
+            elif wing_width >= 10:
                 return "Big Boy"
+            
+            # Chicken IC: Short DTE for earnings plays
+            elif dte <= 14:
+                return "Chicken IC"
+            
+            # Conservative: Lower delta, higher credit requirements
+            elif target_delta <= 0.15 and credit_width_ratio >= 0.25:
+                return "Conservative"
+            
+            # Default to Standard
             else:
                 return "Standard"
-        elif credit_width_ratio >= 0.25:
-            if dte <= 14:
-                return "Chicken IC"
-            else:
-                return "Conservative"
-        else:
-            return "Low Credit"
+                
+        except Exception as e:
+            print(f"Error classifying strategy: {e}")
+            return "Standard"
     
     def estimate_volatility(self, ticker, lookback_days=30):
         """Estimate volatility using historical data"""

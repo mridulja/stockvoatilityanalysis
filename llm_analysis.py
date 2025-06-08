@@ -414,6 +414,219 @@ Provide a brief 3-4 sentence market summary focusing on:
                 'timestamp': datetime.now().isoformat()
             }
 
+    def format_iron_condor_data(self,
+                               ticker: str,
+                               current_price: float,
+                               strategies: List[Dict],
+                               analysis_results: Dict,
+                               best_strategy: Dict) -> Dict[str, Any]:
+        """
+        Format Iron Condor analysis data for LLM analysis
+        
+        Args:
+            ticker: Stock ticker symbol
+            current_price: Current stock price
+            strategies: List of all analyzed strategies
+            analysis_results: Complete analysis results
+            best_strategy: Top recommended strategy
+            
+        Returns:
+            Formatted data dictionary for LLM analysis
+        """
+        
+        # Extract key metrics from best strategy
+        credit_check = best_strategy.get('credit_check', {})
+        
+        # Format top 3 strategies for comparison
+        top_strategies = []
+        for i, strategy in enumerate(strategies[:3]):
+            top_strategies.append({
+                'rank': i + 1,
+                'strategy_type': strategy.get('strategy_type', 'Unknown'),
+                'wing_width': strategy.get('wing_width', 0),
+                'total_credit': strategy.get('total_credit', 0),
+                'pop_black_scholes': strategy.get('pop_black_scholes', 0),
+                'roc_percent': strategy.get('roc_percent', 0),
+                'net_theta': strategy.get('net_theta', 0),
+                'risk_reward_ratio': strategy.get('risk_reward_ratio', 0),
+                'call_structure': f"{strategy.get('call_short', 0):.0f}/{strategy.get('call_long', 0):.0f}",
+                'put_structure': f"{strategy.get('put_long', 0):.0f}/{strategy.get('put_short', 0):.0f}",
+                'meets_credit_req': strategy.get('credit_check', {}).get('meets_requirement', False)
+            })
+        
+        # Market condition assessment
+        market_data = {
+            'dte': analysis_results.get('dte', 0),
+            'volatility': analysis_results.get('volatility', 0),
+            'iv_rank': analysis_results.get('iv_rank'),
+            'total_strategies_found': len(strategies),
+            'bread_butter_count': analysis_results.get('bread_butter_count', 0),
+            'other_strategies_count': analysis_results.get('other_strategies_count', 0)
+        }
+        
+        # Best strategy detailed metrics
+        best_metrics = {
+            'strategy_type': best_strategy.get('strategy_type', 'Unknown'),
+            'wing_width': best_strategy.get('wing_width', 0),
+            'total_credit': best_strategy.get('total_credit', 0),
+            'max_profit': best_strategy.get('max_profit', 0),
+            'max_loss': best_strategy.get('max_loss', 0),
+            'pop_black_scholes': best_strategy.get('pop_black_scholes', 0),
+            'roc_percent': best_strategy.get('roc_percent', 0),
+            'net_theta': best_strategy.get('net_theta', 0),
+            'profit_zone_pct': best_strategy.get('profit_zone_pct', 0),
+            'risk_reward_ratio': best_strategy.get('risk_reward_ratio', 0),
+            'credit_efficiency': credit_check.get('credit_ratio', 0),
+            'meets_bread_butter_rule': credit_check.get('meets_requirement', False),
+            'breakeven_lower': best_strategy.get('lower_breakeven', 0),
+            'breakeven_upper': best_strategy.get('upper_breakeven', 0),
+            'call_short': best_strategy.get('call_short', 0),
+            'call_long': best_strategy.get('call_long', 0),
+            'put_short': best_strategy.get('put_short', 0),
+            'put_long': best_strategy.get('put_long', 0)
+        }
+        
+        formatted_data = {
+            'ticker': ticker,
+            'current_price': current_price,
+            'market_environment': market_data,
+            'best_strategy_metrics': best_metrics,
+            'top_strategies_comparison': top_strategies,
+            'credit_analysis': {
+                'bread_butter_strategies': analysis_results.get('bread_butter_count', 0),
+                'total_strategies': len(strategies),
+                'best_credit_efficiency': credit_check.get('credit_ratio', 0),
+                'meets_1_3_rule': credit_check.get('meets_requirement', False)
+            },
+            'analysis_timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        return formatted_data
+    
+    def create_iron_condor_analysis_prompt(self, data: Dict[str, Any]) -> str:
+        """
+        Create comprehensive prompt for Iron Condor strategy analysis
+        
+        Args:
+            data: Formatted Iron Condor analysis data
+            
+        Returns:
+            Detailed prompt for LLM analysis
+        """
+        
+        best = data['best_strategy_metrics']
+        market = data['market_environment']
+        credit = data['credit_analysis']
+        
+        prompt = f"""
+You are a professional options trader specializing in Iron Condor strategies with 15+ years of experience. 
+Analyze the following Iron Condor strategy data and provide concise, actionable trading guidance.
+
+MARKET ENVIRONMENT:
+==================
+Ticker: {data['ticker']}
+Current Price: ${data['current_price']:.2f}
+Days to Expiry: {market['dte']} days
+Estimated Volatility: {market['volatility']:.1%}
+IV Rank: {market['iv_rank']:.0f}% {"(HIGH - Favorable)" if market.get('iv_rank', 0) >= 30 else "(LOW - Unfavorable)" if market.get('iv_rank', 0) < 20 else "(MEDIUM)"}
+
+RECOMMENDED IRON CONDOR:
+=======================
+Strategy Type: {best['strategy_type']}
+Structure: SELL {best['call_short']:.0f}C / BUY {best['call_long']:.0f}C | SELL {best['put_short']:.0f}P / BUY {best['put_long']:.0f}P
+Wing Width: ${best['wing_width']:.1f}
+Total Credit: ${best['total_credit']:.2f} per share
+Credit Efficiency: {best['credit_efficiency']:.1%} ({"✅ Meets 1/3 Rule" if best['meets_bread_butter_rule'] else "❌ Below 1/3 Rule"})
+
+PROBABILITY & RISK METRICS:
+=========================
+Probability of Profit (Black-Scholes): {best['pop_black_scholes']:.1%}
+Return on Capital: {best['roc_percent']:.1f}%
+Risk/Reward Ratio: {best['risk_reward_ratio']:.2f}:1
+Daily Theta: ${best['net_theta']:.2f}
+Profit Zone: {best['profit_zone_pct']:.1f}% of current price
+Breakevens: ${best['breakeven_lower']:.2f} - ${best['breakeven_upper']:.2f}
+
+STRATEGY LANDSCAPE:
+==================
+Total Strategies Analyzed: {credit['total_strategies']}
+Bread & Butter Qualified: {credit['bread_butter_strategies']}
+Best Credit Efficiency: {credit['best_credit_efficiency']:.1%}
+
+TOP 3 STRATEGY COMPARISON:
+========================="""
+
+        for strategy in data['top_strategies_comparison']:
+            prompt += f"""
+{strategy['rank']}. {strategy['strategy_type']} - ${strategy['wing_width']:.1f} width
+   Credit: ${strategy['total_credit']:.2f} | POP: {strategy['pop_black_scholes']:.1%} | ROC: {strategy['roc_percent']:.1f}% | Theta: ${strategy['net_theta']:.2f}
+   {"✅ Meets Credit Req" if strategy['meets_credit_req'] else "❌ Below Credit Req"}"""
+
+        prompt += f"""
+
+ANALYSIS REQUIREMENTS:
+====================
+Provide a focused analysis in 4 concise sections:
+
+1. **STRATEGY ASSESSMENT** (2-3 sentences)
+   - Quality of the recommended Iron Condor
+   - Key strengths and potential concerns
+
+2. **MARKET TIMING** (2-3 sentences)
+   - Is this a good time to trade this strategy?
+   - Volatility environment impact
+
+3. **RISK MANAGEMENT** (2-3 bullet points)
+   - Key risks to monitor
+   - Exit criteria recommendations
+
+4. **TRADE RECOMMENDATION** (2-3 sentences)
+   - Clear go/no-go recommendation
+   - Specific action items
+
+Be specific, use the exact numbers provided, and focus on actionable insights.
+Assume the reader understands Iron Condor basics - focus on this specific trade analysis.
+"""
+        
+        return prompt
+    
+    def analyze_iron_condor_strategy(self,
+                                   ticker: str,
+                                   current_price: float,
+                                   strategies: List[Dict],
+                                   analysis_results: Dict,
+                                   best_strategy: Dict) -> Dict[str, Any]:
+        """
+        Complete Iron Condor strategy analysis pipeline
+        
+        Args:
+            ticker: Stock ticker symbol
+            current_price: Current stock price
+            strategies: List of all analyzed strategies
+            analysis_results: Complete analysis results
+            best_strategy: Top recommended strategy
+            
+        Returns:
+            Complete analysis result with formatted data and LLM insights
+        """
+        
+        # Format data for analysis
+        formatted_data = self.format_iron_condor_data(
+            ticker, current_price, strategies, analysis_results, best_strategy
+        )
+        
+        # Create analysis prompt
+        prompt = self.create_iron_condor_analysis_prompt(formatted_data)
+        
+        # Generate LLM analysis
+        llm_result = self.generate_analysis(prompt, max_tokens=800)
+        
+        return {
+            'formatted_data': formatted_data,
+            'llm_analysis': llm_result,
+            'prompt_used': prompt
+        }
+
 # Utility functions for Streamlit integration
 def get_llm_analyzer() -> Optional[LLMAnalyzer]:
     """
