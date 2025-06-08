@@ -66,6 +66,27 @@ try:
 except ImportError:
     PUT_SPREAD_AVAILABLE = False
 
+# Import Iron Condor Analysis functionality
+try:
+    from iron_condor_analysis import (
+        IronCondorAnalyzer, 
+        format_currency as ic_format_currency, 
+        format_percentage as ic_format_percentage, 
+        get_next_friday as ic_get_next_friday,
+        get_next_monthly_expiry
+    )
+    from iron_condor_charts import (
+        create_iron_condor_pnl_chart,
+        create_strategy_comparison_chart as ic_create_strategy_comparison_chart,
+        create_pop_distribution_chart as ic_create_pop_distribution_chart,
+        create_trade_management_dashboard,
+        create_volatility_impact_chart,
+        create_earnings_impact_analysis
+    )
+    IRON_CONDOR_AVAILABLE = True
+except ImportError:
+    IRON_CONDOR_AVAILABLE = False
+
 # Fallback functions for Put Spread Analysis
 def get_same_day_expiry():
     """Fallback function for same day expiry"""
@@ -1364,6 +1385,467 @@ def create_probability_chart(recommendations, current_price, ticker):
     
     return fig
 
+def create_iron_condor_tab():
+    """Handle Iron Condor tab content with comprehensive technical analysis"""
+    st.subheader("🦅 Iron Condor Trading Playbook")
+    
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); 
+                padding: 2rem; border-radius: 16px; margin: 1rem 0; 
+                border-left: 6px solid var(--secondary-color); box-shadow: var(--shadow-md);">
+        <h2 style="color: var(--secondary-color); margin: 0; font-weight: 700;">
+            🦅 Iron Condor Strategy Analysis with Technical Reference
+        </h2>
+        <p style="color: var(--text-secondary); margin: 0.5rem 0 0 0; font-size: 1.1rem;">
+            Professional Iron Condor analysis with time decay simulation, exit rule analysis, and comprehensive technical metrics.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Technical Glossary and Formulas
+    with st.expander("📚 Iron Condor Technical Reference & Glossary"):
+        st.markdown("""
+        ### 📊 Glossary of Key Metrics
+        
+        | Symbol/Term | Meaning | Unit |
+        |-------------|---------|------|
+        | **DTE** | Days to Expiration — calendar days until option expiry | days |
+        | **Credit (C)** | Net premium received when opening the IC | $ / share |
+        | **Wing Width (W)** | Difference between short & long strike on one side | $ |
+        | **Max Profit (Πmax)** | Total credit × 100 | $ |
+        | **Max Loss (Λmax)** | (W − C) × 100 | $ |
+        | **Remaining Reward (R)** | Credit still un‑realised (Πmax − profit taken) | $ |
+        | **POP** | Probability‑of‑Profit — odds underlying settles between short strikes at expiry | % |
+        | **POPrem** | POP after you've already realized partial profit; = P(price stays inside) from "now" to expiry | % |
+        | **Theta (θ)** | Daily time‑decay of option price | $ / day |
+        | **Gamma (Γ)** | Rate of change of delta; explodes as DTE → 0 | — |
+        | **ROC** | Return on Capital — profit ÷ margin used | % |
+        
+        ### 🧮 Core Formulas
+        
+        **Basic Calculations:**
+        ```
+        Πmax = C × 100
+        Λmax = (W − C) × 100
+        Profit(t) = Πmax − Price_IC(t) × 100
+        R(t) = Πmax − Profit(t)
+        POPrem = 1 - (|Δ_put(t)| + |Δ_call(t)|)
+        ```
+        
+        **Black-Scholes POP Formula:**
+        ```
+        POP = N((ln(S/B_upper) + (r-q+σ²/2)T) / (σ√T)) - N((ln(S/B_lower) + (r-q+σ²/2)T) / (σ√T))
+        ```
+        Where: S = Stock Price, B = Breakeven, r = Risk-free rate, σ = Volatility, T = Time to expiry
+        
+        ### 📋 Exit Rules Decision Matrix
+        
+        **Rule A — Manage at 21 DTE:**
+        - Monitor DTE daily
+        - If DTE ≤ 21 OR Profit ≥ 50% × Πmax: Close trade
+        - Record: Realized P/L, R(t), POPrem
+        
+        **Rule B — Hold to Expiry:**
+        - Do nothing after entry
+        - On expiry: Close and realize Πmax if inside strikes, otherwise realize loss
+        
+        ### 🎯 Strategy Classifications
+        
+        - **Bread & Butter**: ≥1/3 width credit, $2.5-5 wings, reliable income
+        - **Big Boy**: Wide wings (>$10), higher POP, larger margin
+        - **Chicken IC**: 7-14 DTE for earnings, quick theta capture
+        - **Conservative**: 25% credit minimum, lower risk tolerance
+        
+        ### ⚡ Trade Rules
+        - Enter when IV Rank ≥30 (high volatility environment)
+        - Target 30-60 DTE (sweet spot for theta decay)
+        - Take profit at 50% (25% if <7 DTE)
+        - Close at 21 DTE regardless of P&L
+        - Max 3% account risk per trade
+        """)
+    
+    # Configuration Section
+    st.markdown("### 🔧 Iron Condor Configuration")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # Ticker Selection - Allow ANY ticker input
+        ic_ticker_input = st.text_input(
+            "Enter any ticker symbol:",
+            value="SPY",
+            help="Enter any valid stock or ETF ticker (e.g., AAPL, TSLA, QQQ, etc.)",
+            key="ic_ticker_input"
+        ).upper()
+        
+        # Validate ticker format
+        if ic_ticker_input and ic_ticker_input.replace('.', '').replace('-', '').isalnum():
+            ic_ticker = ic_ticker_input
+        else:
+            ic_ticker = "SPY"
+            if ic_ticker_input:
+                st.warning("⚠️ Invalid ticker format, using SPY as default")
+        
+        # Popular tickers for quick selection
+        popular_tickers = ["SPY", "QQQ", "IWM", "AAPL", "MSFT", "TSLA", "GOOGL", "AMZN", "META", "NVDA"]
+        selected_popular = st.selectbox(
+            "Or select from popular tickers:",
+            [""] + popular_tickers,
+            help="Quick selection of popular trading tickers"
+        )
+        
+        if selected_popular:
+            ic_ticker = selected_popular
+    
+    with col2:
+        # Expiry Selection
+        expiry_type = st.selectbox(
+            "Expiry type:",
+            ["Next Friday", "Next Monthly (3rd Friday)", "Custom Date"],
+            help="Choose expiry timeframe for the Iron Condor"
+        )
+        
+        if expiry_type == "Next Friday":
+            ic_expiry = ic_get_next_friday()
+        elif expiry_type == "Next Monthly (3rd Friday)":
+            ic_expiry = get_next_monthly_expiry()
+        else:  # Custom Date
+            custom_ic_expiry = st.date_input(
+                "Custom expiry date:",
+                value=date.today() + timedelta(days=30),
+                min_value=date.today() + timedelta(days=1),
+                max_value=date.today() + timedelta(days=90),
+                key="custom_ic_expiry"
+            )
+            ic_expiry = custom_ic_expiry.strftime('%Y-%m-%d')
+        
+        st.info(f"**Selected Expiry**: {ic_expiry}")
+    
+    with col3:
+        # Strategy Configuration
+        strategy_focus = st.selectbox(
+            "Strategy focus:",
+            ["Balanced (All Types)", "High Probability (70%+ POP)", "Earnings Play (Chicken IC)", "Conservative (Low Risk)"],
+            help="Choose the type of Iron Condor strategies to analyze"
+        )
+        
+        # Wing width selection
+        if strategy_focus == "Earnings Play (Chicken IC)":
+            wing_widths = [2.5, 5]
+            target_deltas = [0.15, 0.20]
+        elif strategy_focus == "High Probability (70%+ POP)":
+            wing_widths = [5, 10, 15]
+            target_deltas = [0.20, 0.25, 0.30]
+        elif strategy_focus == "Conservative (Low Risk)":
+            wing_widths = [2.5, 5]
+            target_deltas = [0.10, 0.15]
+        else:  # Balanced
+            wing_widths = [2.5, 5, 10]
+            target_deltas = [0.15, 0.20, 0.25]
+    
+    # Analysis Button
+    if st.button("🚀 Analyze Iron Condor Strategies", type="primary", key="ic_analysis_btn"):
+        if not IRON_CONDOR_AVAILABLE:
+            st.error("❌ Iron Condor analysis module not available. Please ensure iron_condor_analysis.py and iron_condor_charts.py are in the same directory.")
+        else:
+            try:
+                st.info(f"🔄 Analyzing Iron Condor strategies for {ic_ticker}...")
+                
+                # Initialize analyzer
+                ic_analyzer = IronCondorAnalyzer()
+                
+                # Run analysis
+                with st.spinner("Fetching options data and analyzing strategies..."):
+                    ic_results = ic_analyzer.analyze_iron_condor_strategies(
+                        ticker=ic_ticker,
+                        expiry_date=ic_expiry,
+                        wing_widths=wing_widths,
+                        target_deltas=target_deltas
+                    )
+                
+                if ic_results and ic_results.get('strategies'):
+                    st.success(f"✅ Found {len(ic_results['strategies'])} Iron Condor strategies for {ic_ticker}")
+                    
+                    # Store results in session state
+                    st.session_state.last_iron_condor_analysis = {
+                        'ticker': ic_ticker,
+                        'results': ic_results,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+                    # Market Condition Assessment
+                    st.markdown("### 📊 Market Condition Assessment")
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Current Price", ic_format_currency(ic_results['current_price']))
+                    with col2:
+                        st.metric("Days to Expiry", f"{ic_results['dte']} days")
+                    with col3:
+                        st.metric("Est. Volatility", ic_format_percentage(ic_results['volatility']))
+                    with col4:
+                        if ic_results['iv_rank'] is not None:
+                            st.metric("IV Rank", f"{ic_results['iv_rank']:.0f}%")
+                            iv_color = "🟢" if ic_results['iv_rank'] >= 30 else "🟡" if ic_results['iv_rank'] >= 20 else "🔴"
+                            st.write(f"{iv_color} {'HIGH' if ic_results['iv_rank'] >= 30 else 'MEDIUM' if ic_results['iv_rank'] >= 20 else 'LOW'}")
+                        else:
+                            st.metric("IV Rank", "N/A")
+                    
+                    # Strategy Results Table
+                    st.markdown("### 📋 Iron Condor Strategy Rankings")
+                    
+                    strategy_df = ic_analyzer.create_strategy_comparison_dataframe(ic_results)
+                    if not strategy_df.empty:
+                        st.dataframe(strategy_df, use_container_width=True)
+                        
+                        # Best Strategy Enhanced Analysis
+                        best_strategy = ic_results['strategies'][0]
+                        current_price = ic_results['current_price']
+                        
+                        # Calculate comprehensive technical metrics
+                        tech_metrics = ic_analyzer.calculate_technical_metrics(best_strategy, current_price)
+                        
+                        st.markdown("""
+                        <div style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); 
+                                    padding: 2rem; border-radius: 16px; margin: 1rem 0; 
+                                    border: 2px solid var(--success-color); box-shadow: var(--shadow-lg);">
+                        """, unsafe_allow_html=True)
+                        
+                        st.markdown(f"""
+                        ### 🏆 TOP IRON CONDOR RECOMMENDATION - COMPREHENSIVE ANALYSIS
+                        
+                        #### 📊 Strategy Structure
+                        **Type**: {best_strategy['strategy_type']} | **DTE**: {tech_metrics.get('dte', 'N/A')} days | **Wing Width**: ${tech_metrics.get('wing_width', 'N/A'):.1f}
+                        
+                        **CALL SPREAD**: SELL ${best_strategy['call_short']:.0f} / BUY ${best_strategy['call_long']:.0f} *(Credit: ${best_strategy.get('call_credit', 0):.2f})*
+                        **PUT SPREAD**: SELL ${best_strategy['put_short']:.0f} / BUY ${best_strategy['put_long']:.0f} *(Credit: ${best_strategy.get('put_credit', 0):.2f})*
+                        
+                        #### 💰 Financial Metrics (Core Formulas)
+                        - **C (Total Credit)**: {ic_format_currency(tech_metrics.get('credit_per_share', 0))} per share
+                        - **Πmax (Max Profit)**: {ic_format_currency(tech_metrics.get('max_profit_dollars', 0))} = C × 100
+                        - **Λmax (Max Loss)**: {ic_format_currency(tech_metrics.get('max_loss_dollars', 0))} = (W − C) × 100
+                        - **R (Remaining Reward)**: {ic_format_currency(tech_metrics.get('remaining_reward', 0))} = Full profit potential at entry
+                        - **ROC (Return on Capital)**: {tech_metrics.get('roc_percent', 0):.1f}% = Profit ÷ Margin Required
+                        - **Margin Required**: {ic_format_currency(tech_metrics.get('margin_required', 0))}
+                        
+                        #### 🎯 Probability Analysis (Multiple Methods)
+                        - **POP (Delta Method)**: {ic_format_percentage(best_strategy.get('pop_delta_method', 0))} = 1 - (|Δcall| + |Δput|)
+                        - **POP (Credit/Width)**: {ic_format_percentage(best_strategy.get('pop_credit_method', 0))} = 1 - (C/W)
+                        - **POP (Black-Scholes)**: {ic_format_percentage(best_strategy.get('pop_black_scholes', 0))} *(Primary Method)*
+                        - **POPrem (Current)**: {ic_format_percentage(tech_metrics.get('pop_remaining', 0))} = Remaining probability from now
+                        
+                        #### ⚡ Greeks Analysis (Risk Management)
+                        - **Θ (Net Theta)**: {ic_format_currency(tech_metrics.get('net_theta', 0))}/day = Daily time decay benefit
+                        - **Γ (Net Gamma)**: {tech_metrics.get('net_gamma', 0):.4f} = Risk of price acceleration
+                        - **ν (Net Vega)**: {tech_metrics.get('net_vega', 0):.2f} = Volatility sensitivity
+                        - **Theta Decay Daily**: {ic_format_currency(tech_metrics.get('theta_decay_daily', 0))} profit potential per day
+                        
+                        #### 🛡️ Risk Assessment & Trade Management
+                        **Breakeven Levels**: {ic_format_currency(tech_metrics.get('breakeven_lower', 0))} ↔ {ic_format_currency(tech_metrics.get('breakeven_upper', 0))}
+                        **Profit Zone Width**: {ic_format_currency(tech_metrics.get('profit_zone_width', 0))} ({best_strategy.get('profit_zone_pct', 0):.1f}% of current price)
+                        **Credit Efficiency**: {tech_metrics.get('credit_to_width_ratio', 0):.1%} (Target: ≥33% for Bread & Butter)
+                        **Est. Days to 50% Profit**: {tech_metrics.get('days_to_50_pct_est', 0):.0f} days (Rule A exit trigger)
+                        
+                        #### 📈 Exit Strategy Decision Matrix
+                        **Rule A (21 DTE Management)**: Exit when DTE ≤ 21 OR Profit ≥ 50%
+                        **Rule B (Hold to Expiry)**: Hold full term for maximum theta capture
+                        **Recommended**: {"Rule A" if tech_metrics.get('dte', 30) > 21 else "Immediate evaluation needed"}
+                        
+                        **Risk Level**: {"🟢 LOW RISK" if best_strategy.get('pop_black_scholes', 0) > 0.7 and tech_metrics.get('gamma_risk', 0) < 0.1 else "🟡 MEDIUM RISK" if best_strategy.get('pop_black_scholes', 0) > 0.5 else "🔴 HIGH RISK"}
+                        """)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                        
+                        # Technical Analysis Tabs
+                        st.markdown("### 📊 Comprehensive Technical Analysis")
+                        
+                        analysis_tab1, analysis_tab2, analysis_tab3, analysis_tab4 = st.tabs([
+                            "📈 P&L Diagram", 
+                            "⏱️ Time Decay Simulation", 
+                            "🎯 Exit Strategy Analysis", 
+                            "📋 Technical Dashboard"
+                        ])
+                        
+                        with analysis_tab1:
+                            # P&L Diagram
+                            st.markdown("#### 📈 Profit/Loss Diagram - Best Strategy")
+                            pnl_fig = create_iron_condor_pnl_chart(best_strategy, ic_results['current_price'])
+                            if pnl_fig:
+                                st.plotly_chart(pnl_fig, use_container_width=True)
+                                
+                                st.info("""
+                                **📊 P&L Diagram Interpretation:**
+                                - **Green Zone**: Profit area between breakevens
+                                - **Red Zones**: Loss areas outside breakevens  
+                                - **Current Price**: Where the stock is now
+                                - **Strike Lines**: Your option positions
+                                - **Max Profit**: Achieved when stock stays between short strikes
+                                """)
+                        
+                        with analysis_tab2:
+                            # Time Decay Simulation
+                            st.markdown("#### ⏱️ Time Decay Simulation & Scenario Analysis")
+                            
+                            with st.spinner("Running time decay simulation..."):
+                                simulation_df = ic_analyzer.simulate_time_decay(best_strategy, current_price)
+                                
+                                if not simulation_df.empty:
+                                    # Create comprehensive time decay chart
+                                    from iron_condor_charts import create_time_decay_simulation_chart
+                                    sim_fig = create_time_decay_simulation_chart(simulation_df, best_strategy)
+                                    if sim_fig:
+                                        st.plotly_chart(sim_fig, use_container_width=True)
+                                    
+                                    st.success("✅ Time decay simulation complete!")
+                                    
+                                    # Simulation insights
+                                    st.markdown("#### 🔍 Simulation Insights")
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    
+                                    with col1:
+                                        # Best case scenario
+                                        best_case = simulation_df[simulation_df['price_scenario'] == '+0.0%']
+                                        if not best_case.empty:
+                                            final_profit = best_case[best_case['dte'] == 0]['profit_loss'].iloc[0]
+                                            st.metric("At-The-Money Profit", f"${final_profit:.2f}", "If stock stays current")
+                                    
+                                    with col2:
+                                        # Average theta per day
+                                        avg_theta = simulation_df[simulation_df['price_scenario'] == '+0.0%']['theta_total'].mean()
+                                        st.metric("Avg Daily Theta", f"${avg_theta:.2f}", "Per day time decay")
+                                    
+                                    with col3:
+                                        # 21 DTE profit estimate
+                                        day_21 = simulation_df[(simulation_df['dte'] == 21) & (simulation_df['price_scenario'] == '+0.0%')]
+                                        if not day_21.empty:
+                                            profit_21 = day_21['profit_loss'].iloc[0]
+                                            st.metric("21 DTE Profit Est.", f"${profit_21:.2f}", "Rule A exit level")
+                                else:
+                                    st.warning("⚠️ Could not run time decay simulation")
+                        
+                        with analysis_tab3:
+                            # Exit Strategy Analysis
+                            st.markdown("#### 🎯 Exit Strategy Analysis - Rule A vs Rule B")
+                            
+                            with st.spinner("Analyzing exit strategies..."):
+                                exit_analysis = ic_analyzer.analyze_exit_strategies(best_strategy, current_price)
+                                
+                                if exit_analysis:
+                                    # Create exit strategy chart
+                                    from iron_condor_charts import create_exit_strategy_analysis_chart
+                                    exit_fig = create_exit_strategy_analysis_chart(exit_analysis)
+                                    if exit_fig:
+                                        st.plotly_chart(exit_fig, use_container_width=True)
+                                    
+                                    # Exit strategy recommendations
+                                    st.markdown("#### 📋 Exit Strategy Recommendations")
+                                    
+                                    summary = exit_analysis.get('summary', {})
+                                    
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.markdown("**🎯 Rule A (21 DTE Management)**")
+                                        st.write(f"• Average Profit: ${summary.get('rule_a_avg_profit', 0):.2f}")
+                                        st.write(f"• Win Rate: {summary.get('rule_a_win_rate', 0):.1f}%")
+                                        st.write(f"• Theta Captured: {summary.get('theta_captured_rule_a', 0):.1f}%")
+                                        st.write(f"• Risk Reduction: {summary.get('risk_reduction_rule_a', 0):.1f}% POPrem")
+                                    
+                                    with col2:
+                                        st.markdown("**⏳ Rule B (Hold to Expiry)**")
+                                        st.write(f"• Average Profit: ${summary.get('rule_b_avg_profit', 0):.2f}")
+                                        st.write(f"• Win Rate: {summary.get('rule_b_win_rate', 0):.1f}%")
+                                        st.write(f"• Theta Captured: 100% (full term)")
+                                        st.write(f"• Risk Reduction: 0% (expired)")
+                                    
+                                    # Decision recommendation
+                                    rule_a_better = summary.get('rule_a_avg_profit', 0) > summary.get('rule_b_avg_profit', 0)
+                                    
+                                    if rule_a_better:
+                                        st.success("**🎯 RECOMMENDATION: Use Rule A (21 DTE Management)**")
+                                        st.write("Rule A shows better risk-adjusted returns with reduced tail risk.")
+                                    else:
+                                        st.info("**⏳ RECOMMENDATION: Use Rule B (Hold to Expiry)**")
+                                        st.write("Rule B shows higher absolute returns if you can accept the additional risk.")
+                                
+                                else:
+                                    st.warning("⚠️ Could not complete exit strategy analysis")
+                        
+                        with analysis_tab4:
+                            # Technical Dashboard
+                            st.markdown("#### 📋 Technical Metrics Dashboard")
+                            
+                            # Create technical metrics dashboard
+                            from iron_condor_charts import create_technical_metrics_dashboard
+                            tech_fig = create_technical_metrics_dashboard(best_strategy, current_price)
+                            if tech_fig:
+                                st.plotly_chart(tech_fig, use_container_width=True)
+                            
+                            # KPI Summary Table
+                            st.markdown("#### 📊 Key Performance Indicators (KPIs)")
+                            
+                            kpi_data = {
+                                'Metric': [
+                                    'Probability of Profit (Black-Scholes)',
+                                    'Return on Capital (ROC)',
+                                    'Risk/Reward Ratio', 
+                                    'Credit Efficiency (C/W)',
+                                    'Daily Theta Decay',
+                                    'Gamma Risk Level',
+                                    'Days to 50% Profit (Est.)',
+                                    'Profit Zone Coverage',
+                                    'Margin Efficiency',
+                                    'Strategy Quality Score'
+                                ],
+                                'Value': [
+                                    f"{best_strategy.get('pop_black_scholes', 0):.1%}",
+                                    f"{tech_metrics.get('roc_percent', 0):.1f}%",
+                                    f"{best_strategy.get('risk_reward_ratio', 0):.2f}:1",
+                                    f"{tech_metrics.get('credit_to_width_ratio', 0):.1%}",
+                                    f"${tech_metrics.get('net_theta', 0):.2f}",
+                                    f"{'Low' if tech_metrics.get('gamma_risk', 0) < 0.1 else 'Medium' if tech_metrics.get('gamma_risk', 0) < 0.2 else 'High'}",
+                                    f"{tech_metrics.get('days_to_50_pct_est', 0):.0f} days",
+                                    f"{best_strategy.get('profit_zone_pct', 0):.1f}%",
+                                    f"{(tech_metrics.get('max_profit_dollars', 0) / tech_metrics.get('margin_required', 1)):.1%}",
+                                    f"{'Excellent' if best_strategy.get('pop_black_scholes', 0) > 0.75 else 'Good' if best_strategy.get('pop_black_scholes', 0) > 0.65 else 'Fair'}"
+                                ],
+                                'Target/Benchmark': [
+                                    '>70% (High Prob)',
+                                    '>15% (Good)',
+                                    '>0.3 (Favorable)',
+                                    '>33% (Bread & Butter)',
+                                    '>$10/day (Active)',
+                                    'Low (<0.1)',
+                                    '<30 days (Quick)',
+                                    '>15% (Wide)',
+                                    '>20% (Efficient)',
+                                    'Good+ (Target)'
+                                ]
+                            }
+                            
+                            kpi_df = pd.DataFrame(kpi_data)
+                            st.dataframe(kpi_df, use_container_width=True)
+                    
+                    else:
+                        st.warning("⚠️ No strategies found to analyze")
+                
+                else:
+                    st.error(f"❌ No Iron Condor strategies found for {ic_ticker}")
+                    st.markdown("""
+                    **Possible reasons**:
+                    - No options data available for this ticker
+                    - Insufficient liquidity in options chain  
+                    - Invalid ticker symbol
+                    
+                    **Try**: SPY, QQQ, AAPL, MSFT, or other liquid tickers
+                    """)
+            
+            except Exception as e:
+                st.error(f"❌ Iron Condor analysis failed: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+
 def main():
     # Add comprehensive analysis capability to LLM
     if LLM_AVAILABLE:
@@ -1637,14 +2119,15 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
             "📊 Summary", 
             "📈 Price Charts", 
             "🔍 Detailed Stats", 
             "⚖️ Comparison", 
             "📉 VIX Analysis",
             "🎯 Options Strategy",
-            "📐 Put Spread Analysis"
+            "📐 Put Spread Analysis",
+            "🦅 Iron Condor Playbook"
         ])
         
         with tab1:
@@ -2981,6 +3464,9 @@ def main():
                     st.error(f"❌ Put spread analysis failed: {str(e)}")
                     import traceback
                     st.code(traceback.format_exc())
+        
+        with tab8:
+            create_iron_condor_tab()
     
     else:
         # No analysis run yet - show standalone Options
