@@ -227,7 +227,7 @@ def display_ai_analysis(ai_content, analysis_type="Analysis", tab_color="#6366f1
                     use_container_width=True):
             if session_key in st.session_state and analysis_key in st.session_state[session_key]:
                 del st.session_state[session_key][analysis_key]
-                st.rerun()
+                st.success("🔄 Analysis cleared! Click 'Generate AI Analysis' to create a new one.")
     
     with col2:
         if st.button("📋 Copy to Clipboard", 
@@ -243,7 +243,7 @@ def display_ai_analysis(ai_content, analysis_type="Analysis", tab_color="#6366f1
                     use_container_width=True):
             if session_key in st.session_state and analysis_key in st.session_state[session_key]:
                 del st.session_state[session_key][analysis_key]
-                st.rerun()
+                st.success("🗑️ Analysis cleared successfully!")
 
 
 def display_ai_placeholder(analysis_type="Analysis", features_list=None):

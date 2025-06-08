@@ -111,6 +111,12 @@ try:
 except ImportError:
     TAB4_MODULAR = False
 
+try:
+    from tabs.tab5_vix_analysis import render_vix_analysis_tab
+    TAB5_MODULAR = True
+except ImportError:
+    TAB5_MODULAR = False
+
 # Fallback functions for Put Spread Analysis
 def get_same_day_expiry():
     """Fallback function for same day expiry"""
@@ -1114,34 +1120,41 @@ def main():
                 st.info("Please ensure tabs/tab4_comparison.py is available for full functionality.")
         
         with tab5:
-            st.subheader("📉 VIX Market Condition Analysis")
-            
-            if vix_data is not None:
-                current_vix = vix_data['VIX_Close'].iloc[-1]
-                condition, condition_class, icon = get_vix_condition(current_vix)
-                trade_ok, trade_msg = should_trade(current_vix)
-                
-                st.markdown(f"""
-                <div class="{condition_class}">
-                    <h3>{icon} Current VIX: {current_vix:.2f}</h3>
-                    <p><strong>Market Condition:</strong> {condition}</p>
-                    <p><strong>Trading Recommendation:</strong> {trade_msg}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # VIX statistics
-                vix_stats = vix_data['VIX_Close'].describe()
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Mean VIX", f"{vix_stats['mean']:.2f}")
-                with col2:
-                    st.metric("Std Dev", f"{vix_stats['std']:.2f}")
-                with col3:
-                    st.metric("Min VIX", f"{vix_stats['min']:.2f}")
-                with col4:
-                    st.metric("Max VIX", f"{vix_stats['max']:.2f}")
+            # Use modular Tab 5 if available, otherwise fallback to original
+            if TAB5_MODULAR:
+                render_vix_analysis_tab(results, vix_data, session_tickers)
             else:
-                st.info("VIX analysis not available. Enable VIX analysis in sidebar and run analysis.")
+                st.warning("⚠️ Modular Tab 5 not available. Using fallback implementation.")
+                st.subheader("📉 VIX Market Condition Analysis (Fallback)")
+                
+                if vix_data is not None:
+                    current_vix = vix_data['VIX_Close'].iloc[-1]
+                    condition, condition_class, icon = get_vix_condition(current_vix)
+                    trade_ok, trade_msg = should_trade(current_vix)
+                    
+                    st.markdown(f"""
+                    <div class="{condition_class}">
+                        <h3>{icon} Current VIX: {current_vix:.2f}</h3>
+                        <p><strong>Market Condition:</strong> {condition}</p>
+                        <p><strong>Trading Recommendation:</strong> {trade_msg}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # VIX statistics
+                    vix_stats = vix_data['VIX_Close'].describe()
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Mean VIX", f"{vix_stats['mean']:.2f}")
+                    with col2:
+                        st.metric("Std Dev", f"{vix_stats['std']:.2f}")
+                    with col3:
+                        st.metric("Min VIX", f"{vix_stats['min']:.2f}")
+                    with col4:
+                        st.metric("Max VIX", f"{vix_stats['max']:.2f}")
+                else:
+                    st.info("VIX analysis not available. Enable VIX analysis in sidebar and run analysis.")
+                
+                st.info("Please ensure tabs/tab5_vix_analysis.py is available for full functionality.")
         
         with tab6:
             st.subheader("🎯 Advanced Options Strategy")
