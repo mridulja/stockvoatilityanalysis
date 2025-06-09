@@ -12,6 +12,8 @@ from .tab3_detailed_stats import render_detailed_stats_tab
 from .tab4_comparison import render_comparison_tab
 from .tab5_vix_analysis import render_vix_analysis_tab
 from .tab6_options_strategy import render_options_strategy_tab
+from .tab7_put_spread_analysis import render_put_spread_analysis_tab
+from .tab8_iron_condor_playbook import render_iron_condor_playbook_tab
 
 __all__ = [
     'render_summary_tab',
@@ -19,5 +21,7 @@ __all__ = [
     'render_detailed_stats_tab',
     'render_comparison_tab',
     'render_vix_analysis_tab',
-    'render_options_strategy_tab'
+    'render_options_strategy_tab',
+    'render_put_spread_analysis_tab',
+    'render_iron_condor_playbook_tab'
 ] 

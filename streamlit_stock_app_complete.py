@@ -633,7 +633,10 @@ def create_comparison_chart(results_dict, metric='atr'):
     return fig
 
 # Import the working function from core module
-from core.charts import create_enhanced_price_chart
+try:
+    from core.charts import create_enhanced_price_chart
+except ImportError:
+    pass  # Core charts module not available
 
 def create_enhanced_price_chart_backup(data, ticker, timeframe, chart_type='Candlestick', show_volume=True, indicators=None, vix_data=None):
     """Create enhanced interactive price chart with technical indicators"""
@@ -934,6 +937,7 @@ def create_enhanced_price_chart_backup(data, ticker, timeframe, chart_type='Cand
     
     return fig
 
+
 def main():
     """Main Streamlit application with 8 comprehensive tabs"""
 
@@ -1187,22 +1191,38 @@ def main():
                 st.info("Please ensure tabs/tab6_options_strategy.py is available for full functionality.")
         
         with tab7:
-            st.subheader("📐 Advanced Put Spread Analysis")
-            
-            if PUT_SPREAD_AVAILABLE:
-                st.success("✅ Put Spread Analysis module is available")
-                st.info("📊 Put spread functionality ready for implementation")
-            else:
-                st.warning("Put spread analysis module not available. Install put_spread_analysis.py")
+            # Check if we have the modular tab available
+            try:
+                from tabs.tab7_put_spread_analysis import render_put_spread_analysis_tab
+                render_put_spread_analysis_tab(results, vix_data, session_tickers)
+            except ImportError:
+                st.warning("⚠️ Modular Tab 7 not available. Using fallback implementation.")
+                st.subheader("📐 Advanced Put Spread Analysis (Fallback)")
+                
+                if PUT_SPREAD_AVAILABLE:
+                    st.success("✅ Put Spread Analysis module is available")
+                    st.info("📊 Put spread functionality ready for implementation")
+                else:
+                    st.warning("Put spread analysis module not available. Install put_spread_analysis.py")
+                
+                st.info("Please ensure tabs/tab7_put_spread_analysis.py is available for full functionality.")
         
         with tab8:
-            st.subheader("🦅 Iron Condor Trading Playbook")
-            
-            if IRON_CONDOR_AVAILABLE:
-                st.success("✅ Iron Condor Analysis module is available") 
-                st.info("📊 Iron Condor functionality ready for implementation")
-            else:
-                st.warning("Iron Condor analysis module not available. Install iron_condor_analysis.py")
+            # Check if we have the modular tab available
+            try:
+                from tabs.tab8_iron_condor_playbook import render_iron_condor_playbook_tab
+                render_iron_condor_playbook_tab(results, vix_data, session_tickers)
+            except ImportError:
+                st.warning("⚠️ Modular Tab 8 not available. Using fallback implementation.")
+                st.subheader("🦅 Iron Condor Trading Playbook (Fallback)")
+                
+                if IRON_CONDOR_AVAILABLE:
+                    st.success("✅ Iron Condor Analysis module is available")
+                    st.info("📊 Iron Condor functionality ready for implementation")
+                else:
+                    st.warning("Iron Condor analysis module not available. Install iron_condor_analysis.py")
+                
+                st.info("Please ensure tabs/tab8_iron_condor_playbook.py is available for full functionality.")
     
     else:
         # No analysis run yet
