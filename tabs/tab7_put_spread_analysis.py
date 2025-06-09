@@ -559,18 +559,30 @@ def render_put_spread_analysis_tab(results, vix_data, session_tickers):
     strategy_col1, strategy_col2 = st.columns(2)
     
     with strategy_col1:
+        # Initialize spread type in session state if not exists
+        if "put_spread_type_value" not in st.session_state:
+            st.session_state.put_spread_type_value = "Bull Put Spread"
+        
         spread_type = st.selectbox(
             "Put Spread Type:",
             ["Bull Put Spread", "Bear Put Spread"],
+            index=["Bull Put Spread", "Bear Put Spread"].index(st.session_state.put_spread_type_value),
             help="Bull Put = Bullish bias, Bear Put = Bearish bias",
-            key="put_spread_type"
+            key="put_spread_type",
+            on_change=lambda: setattr(st.session_state, 'put_spread_type_value', st.session_state.put_spread_type)
         )
     
     with strategy_col2:
+        # Initialize analysis mode in session state if not exists
+        if "put_analysis_mode_value" not in st.session_state:
+            st.session_state.put_analysis_mode_value = "Manual Selection"
+        
         analysis_mode = st.selectbox(
             "Analysis Mode:",
             ["Manual Selection", "Quick Analysis"],
-            key="put_analysis_mode"
+            index=["Manual Selection", "Quick Analysis"].index(st.session_state.put_analysis_mode_value),
+            key="put_analysis_mode",
+            on_change=lambda: setattr(st.session_state, 'put_analysis_mode_value', st.session_state.put_analysis_mode)
         )
     
     # === VOLATILITY ESTIMATION ===

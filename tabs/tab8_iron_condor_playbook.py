@@ -301,10 +301,16 @@ def render_iron_condor_playbook_tab(results, vix_data, session_tickers):
     expiry_col1, expiry_col2, expiry_col3 = st.columns(3)
     
     with expiry_col1:
+        # Initialize expiry type in session state if not exists
+        if "iron_condor_expiry_type_value" not in st.session_state:
+            st.session_state.iron_condor_expiry_type_value = "Next Friday"
+        
         expiry_type = st.selectbox(
             "Expiry Type:",
             ["Next Friday", "Monthly Expiry", "Custom Date"],
-            key="iron_condor_expiry_type"
+            index=["Next Friday", "Monthly Expiry", "Custom Date"].index(st.session_state.iron_condor_expiry_type_value),
+            key="iron_condor_expiry_type",
+            on_change=lambda: setattr(st.session_state, 'iron_condor_expiry_type_value', st.session_state.iron_condor_expiry_type)
         )
     
     with expiry_col2:
@@ -349,11 +355,17 @@ def render_iron_condor_playbook_tab(results, vix_data, session_tickers):
     focus_col1, focus_col2 = st.columns(2)
     
     with focus_col1:
+        # Initialize strategy focus in session state if not exists
+        if "ic_strategy_focus_value" not in st.session_state:
+            st.session_state.ic_strategy_focus_value = "Balanced"
+        
         strategy_focus = st.selectbox(
             "Strategy Focus:",
             ["Balanced", "High Probability", "Earnings Play", "Conservative"],
+            index=["Balanced", "High Probability", "Earnings Play", "Conservative"].index(st.session_state.ic_strategy_focus_value),
             help="Choose strategy focus based on market outlook and risk tolerance",
-            key="ic_strategy_focus"
+            key="ic_strategy_focus",
+            on_change=lambda: setattr(st.session_state, 'ic_strategy_focus_value', st.session_state.ic_strategy_focus)
         )
     
     with focus_col2:
