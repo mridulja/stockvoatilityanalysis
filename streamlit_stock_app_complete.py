@@ -742,7 +742,7 @@ def create_enhanced_price_chart_backup(data, ticker, timeframe, chart_type='Cand
                 ),
                 row=1, col=1
             )
-        
+    
         if indicators.get('ema_12') and 'EMA_12' in data.columns:
             fig.add_trace(
                 go.Scatter(
@@ -829,33 +829,33 @@ def create_enhanced_price_chart_backup(data, ticker, timeframe, chart_type='Cand
                 ),
                 row=1, col=1
             )
-    
-    # Technical indicators subplot (ATR)
-    if 'true_range' in data.columns:
-        atr_window = min(14, len(data))
-        atr_line = data['true_range'].rolling(window=atr_window).mean()
         
-        fig.add_trace(
-            go.Scatter(
-                x=data.index,
-                y=atr_line,
-                mode='lines',
-                name=f'ATR ({atr_window})',
-                line=dict(color='#f44336', width=2)
-            ),
-            row=2, col=1
-        )
-        
-        # Add ATR average line
-        atr_avg = atr_line.mean()
-        fig.add_hline(
-            y=atr_avg,
-            line_dash="dash",
-            line_color="#f44336",
-            opacity=0.5,
-            row=2,
-            annotation_text=f"ATR Avg: ${atr_avg:.2f}"
-        )
+        # Technical indicators subplot (ATR)
+        if 'true_range' in data.columns:
+            atr_window = min(14, len(data))
+            atr_line = data['true_range'].rolling(window=atr_window).mean()
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=data.index,
+                    y=atr_line,
+                    mode='lines',
+                    name=f'ATR ({atr_window})',
+                    line=dict(color='#f44336', width=2)
+                ),
+                row=2, col=1
+            )
+            
+            # Add ATR average line
+            atr_avg = atr_line.mean()
+            fig.add_hline(
+                y=atr_avg,
+                line_dash="dash",
+                line_color="#f44336",
+                opacity=0.5,
+                row=2,
+                annotation_text=f"ATR Avg: ${atr_avg:.2f}"
+            )
     
     # Volume subplot
     if show_volume and 'Volume' in data.columns:
@@ -957,17 +957,18 @@ def main():
     if 'vix_data' not in st.session_state:
         st.session_state.vix_data = None
     if 'selected_tickers' not in st.session_state:
-        st.session_state.selected_tickers = ['SPY', 'QQQ']
+        from config.settings import DEFAULT_TICKERS
+        st.session_state.selected_tickers = DEFAULT_TICKERS[:2]  # Use first 2 from settings
     
     # Sidebar for controls
     st.sidebar.header("Analysis Parameters")
     
     # Ticker selection
-    default_tickers = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'TSLA', 'GLD']
+    from config.settings import DEFAULT_TICKERS
     selected_tickers = st.sidebar.multiselect(
         "Select Stock Tickers",
-        options=default_tickers + ['NVDA', 'GOOGL', 'AMZN', 'META', 'NFLX', 'IWM', 'DIA'],
-        default=['SPY', 'QQQ'],
+        options=DEFAULT_TICKERS,
+        default=DEFAULT_TICKERS[:2],  # Use first 2 tickers from settings as default
         help="Choose up to 5 tickers for comparison"
     )
     
@@ -1112,7 +1113,7 @@ def main():
             else:
                 st.warning("⚠️ Modular Tab 4 not available. Using fallback implementation.")
                 st.subheader("⚖️ Multi-Ticker Comparison (Fallback)")
-                
+            
                 if len(session_tickers) > 1:
                     comparison_metric = st.selectbox(
                         "Select metric to compare:",

@@ -154,4 +154,196 @@ def format_options_strategy_data_for_llm(ticker, current_price, volatility_data,
     Trade Approved: {vix_data.get('trade_approved', 'N/A') if vix_data else 'N/A'}
     """
     
-    return formatted_data 
+    return formatted_data
+
+
+def format_master_analysis_data_for_llm(master_data):
+    """Format comprehensive master analysis data for LLM recommendations"""
+    
+    params = master_data['parameters']
+    analysis = master_data['analysis_results']
+    
+    formatted_data = f"""
+    MASTER TRADING ANALYSIS REQUEST:
+    ===============================
+    
+    TRADE PARAMETERS:
+    ----------------
+    Primary Ticker: {params['ticker']}
+    Investment Amount: ${params['amount']:,}
+    Options Expiry: {params['expiry']}
+    Risk Tolerance: {params['risk_tolerance']}
+    Time Horizon: {params['time_horizon']}
+    Position Preference: {params['position_preference']} {f"(Auto-detected from: {params.get('original_position_preference', 'N/A')})" if 'Auto' in params.get('original_position_preference', '') else ''}
+    Market Bias Analysis: {params.get('position_preference', 'Neutral')} bias determined from technical indicators
+    
+    COMPREHENSIVE ANALYSIS RESULTS:
+    ==============================
+    
+    PRICE PATTERN ANALYSIS:
+    ----------------------
+    {format_analysis_section('price_charts', analysis.get('price_charts', {}))}
+    
+    DETAILED STATISTICS:
+    -------------------
+    {format_analysis_section('detailed_stats', analysis.get('detailed_stats', {}))}
+    
+    COMPARISON ANALYSIS:
+    -------------------
+    {format_analysis_section('comparison', analysis.get('comparison', {}))}
+    
+    VIX MARKET CONDITIONS:
+    ---------------------
+    {format_analysis_section('vix', analysis.get('vix', {}))}
+    
+    OPTIONS STRATEGIES:
+    ------------------
+    {format_analysis_section('options', analysis.get('options', {}))}
+    
+    PUT SPREAD OPPORTUNITIES:
+    ------------------------
+    {format_analysis_section('put_spread', analysis.get('put_spread', {}))}
+    
+    IRON CONDOR STRATEGIES:
+    ----------------------
+    {format_analysis_section('iron_condor', analysis.get('iron_condor', {}))}
+    
+    MASTER RECOMMENDATION REQUEST:
+    =============================
+    Based on this comprehensive analysis, please provide:
+    
+    1. TOP 3 TRADING RECOMMENDATIONS with specific:
+       - Strategy name and type
+       - Entry price and timing
+       - Risk level (Low/Medium/High)
+       - Probability of Profit (POP)
+       - Return on Capital (ROC)
+       - Maximum profit and risk amounts
+       - Specific action steps
+    
+    2. RISK ASSESSMENT:
+       - Overall market risk level
+       - Position sizing recommendations
+       - Risk management strategies
+    
+    3. EXECUTION PRIORITIES:
+       - Which strategy to execute first
+       - Optimal timing considerations
+       - Market condition dependencies
+    
+    Please format response to be concise yet comprehensive, focusing on actionable insights.
+    """
+    
+    return formatted_data
+
+
+def format_master_analysis_with_actual_data(master_data, actual_strategies):
+    """Format master analysis data with ACTUAL strategy numbers for accurate LLM analysis"""
+    
+    params = master_data['parameters']
+    analysis = master_data['analysis_results']
+    
+    # Format the actual strategy data that matches the displayed table
+    strategies_text = ""
+    for i, strategy in enumerate(actual_strategies, 1):
+        strategies_text += f"""
+    STRATEGY {i}: {strategy['name']}
+    --------------------------------
+    Put Short Strike: {strategy['put_short']}
+    Put Long Strike: {strategy['put_long']}
+    Call Short Strike: {strategy['call_short']}
+    Call Long Strike: {strategy['call_long']}
+    Net Credit Received: {strategy['net_credit']}
+    Maximum Profit: {strategy['max_profit']}
+    Maximum Loss: {strategy['max_loss']}
+    Probability of Profit: {strategy['pop']}
+    Return on Capital: {strategy['roc']}
+    """
+    
+    formatted_data = f"""
+    MASTER TRADING ANALYSIS WITH ACTUAL STRATEGY DATA:
+    ================================================
+    
+    TRADE PARAMETERS:
+    ----------------
+    Primary Ticker: {params['ticker']}
+    Investment Amount: ${params['amount']:,}
+    Options Expiry: {params['expiry']}
+    Risk Tolerance: {params['risk_tolerance']}
+    Time Horizon: {params['time_horizon']}
+    Position Preference: {params['position_preference']} {f"(Auto-detected from: {params.get('original_position_preference', 'N/A')})" if 'Auto' in params.get('original_position_preference', '') else ''}
+    
+    ACTUAL STRATEGY RECOMMENDATIONS (EXACTLY AS DISPLAYED):
+    =====================================================
+    {strategies_text}
+    
+    VIX MARKET CONDITIONS:
+    ---------------------
+    {format_analysis_section('vix', analysis.get('vix', {}))}
+    
+    ANALYSIS REQUEST:
+    ================
+    You are analyzing the EXACT strategies and numbers shown above. Please provide:
+    
+    1. **STRATEGY ANALYSIS**: 
+       - Evaluate each of the 3 strategies using the EXACT strikes and amounts provided
+       - Comment on the strike selection relative to current market conditions
+       - Assess the risk/reward profile of each strategy
+    
+    2. **RECOMMENDATION RANKING**:
+       - Rank the strategies from best to worst for current market conditions
+       - Explain WHY each strategy is suitable or unsuitable
+       - Consider the user's {params['risk_tolerance']} risk tolerance
+    
+    3. **EXECUTION GUIDANCE**:
+       - Which strategy to execute first and why
+       - Entry timing considerations
+       - Risk management recommendations
+       - Exit strategy planning
+    
+    4. **MARKET CONTEXT**:
+       - How current market conditions affect these specific strategies
+       - What market scenarios favor each strategy
+       - Key risks to monitor
+    
+    Please reference the ACTUAL NUMBERS provided above in your analysis. Be specific about the strikes, premiums, and profit/loss figures.
+    """
+    
+    return formatted_data
+
+
+def format_analysis_section(section_name, data):
+    """Helper function to format individual analysis sections"""
+    if not data or data.get('status') == 'No data available':
+        return f"{section_name.title()}: No data available"
+    
+    if section_name == 'vix':
+        return f"""Current VIX: {data.get('current_vix', 'N/A')}
+Market Condition: {data.get('condition', 'N/A')}
+Trade Environment: {data.get('trade_environment', 'N/A')}
+Recommendation: {data.get('recommendation', 'N/A')}"""
+    
+    elif section_name == 'options':
+        strategies = []
+        for strategy, details in data.items():
+            if isinstance(details, dict):
+                strategies.append(f"{strategy}: POP {details.get('pop', 0)}%, Max Profit ${details.get('max_profit', 0)}")
+        return '\n'.join(strategies) if strategies else "Options data available"
+    
+    elif section_name == 'put_spread':
+        spreads = []
+        for spread, details in data.items():
+            if isinstance(details, dict):
+                spreads.append(f"{spread}: POP {details.get('pop', 0)}%, ROC {details.get('roc', 0)}%")
+        return '\n'.join(spreads) if spreads else "Put spread data available"
+    
+    elif section_name == 'iron_condor':
+        condors = []
+        for condor, details in data.items():
+            if isinstance(details, dict):
+                condors.append(f"{condor}: POP {details.get('pop', 0)}%, ROC {details.get('roc', 0)}%")
+        return '\n'.join(condors) if condors else "Iron condor data available"
+    
+    else:
+        # Generic formatting for other sections
+        return f"{section_name.title()}: Analysis completed with {len(data)} data points" 

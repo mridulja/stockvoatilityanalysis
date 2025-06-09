@@ -7,7 +7,7 @@ This module contains all application settings, constants, and default values.
 from datetime import date, timedelta
 
 # Default stock tickers
-DEFAULT_TICKERS = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'TSLA', 'GLD', 'NVDA', 'GOOGL', 'AMZN', 'META', 'NFLX', 'IWM', 'DIA']
+DEFAULT_TICKERS = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'TSLA', 'GLD', 'NVDA', 'GOOGL', 'AMZN', 'META', 'NFLX', 'IWM', 'DIA', 'VRT', 'HOOD', 'GDX', 'OUST','IBIT', 'SMCI', 'FTNT', 'EW', 'LLY', 'T']
 
 # Application configuration
 APP_CONFIG = {
