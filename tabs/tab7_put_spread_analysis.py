@@ -54,22 +54,24 @@ def get_next_friday():
     return today + timedelta(days=days_ahead)
 
 def get_monthly_expiry():
-    """Get next monthly options expiry (3rd Friday)"""
+    """Get third Friday of next month (monthly options expiry)"""
     today = date.today()
-    # Find 3rd Friday of current month
-    first_day = today.replace(day=1)
-    first_friday = first_day + timedelta(days=(4 - first_day.weekday()) % 7)
-    third_friday = first_friday + timedelta(days=14)
+    # Get next month
+    if today.month == 12:
+        next_month = today.replace(year=today.year + 1, month=1, day=1)
+    else:
+        next_month = today.replace(month=today.month + 1, day=1)
     
-    # If 3rd Friday has passed, get next month's 3rd Friday
-    if third_friday <= today:
-        if today.month == 12:
-            next_month = today.replace(year=today.year + 1, month=1, day=1)
-        else:
-            next_month = today.replace(month=today.month + 1, day=1)
-        
-        first_friday = next_month + timedelta(days=(4 - next_month.weekday()) % 7)
-        third_friday = first_friday + timedelta(days=14)
+    # Find third Friday of next month
+    first_day = next_month
+    first_weekday = first_day.weekday()
+    
+    # Calculate first Friday
+    days_to_friday = (4 - first_weekday) % 7
+    first_friday = first_day + timedelta(days=days_to_friday)
+    
+    # Third Friday is 14 days after first Friday
+    third_friday = first_friday + timedelta(days=14)
     
     return third_friday
 
@@ -358,11 +360,12 @@ def find_optimal_put_spreads(current_price, puts_data, spread_type='bull', min_d
     if puts_data is None or puts_data.empty:
         return []
     
-    # Filter liquid options
+    # Filter liquid options (more stringent criteria for better spreads)
     liquid_puts = puts_data[
         (puts_data['volume'] > 10) & 
         (puts_data['openInterest'] > 50) &
-        (puts_data['bid'] > 0.05)
+        (puts_data['bid'] > 0.05) &
+        (puts_data['ask'] > puts_data['bid'])  # Ensure valid bid-ask spread
     ].copy()
     
     if len(liquid_puts) < 2:
@@ -373,14 +376,18 @@ def find_optimal_put_spreads(current_price, puts_data, spread_type='bull', min_d
     # Find spreads based on type
     if spread_type == 'bull':
         # Bull put spread: Short higher strike, Long lower strike
-        for i, short_put in liquid_puts.iterrows():
+        # CRITICAL FIX: Only consider strikes BELOW current price
+        liquid_puts_filtered = liquid_puts[liquid_puts['strike'] < current_price * 0.98]
+        
+        for i, short_put in liquid_puts_filtered.iterrows():
             short_strike = short_put['strike']
             short_premium = (short_put['bid'] + short_put['ask']) / 2
             
             # Find suitable long strikes (lower than short strike)
+            # CRITICAL FIX: Reduced max width from 15% to 5% for realistic spreads
             long_candidates = liquid_puts[
                 (liquid_puts['strike'] < short_strike) &
-                (liquid_puts['strike'] >= short_strike * 0.85)  # Max 15% width
+                (liquid_puts['strike'] >= short_strike * 0.95)  # MAX 5% width instead of 15%
             ]
             
             for j, long_put in long_candidates.iterrows():
@@ -392,7 +399,11 @@ def find_optimal_put_spreads(current_price, puts_data, spread_type='bull', min_d
                 max_profit = net_credit
                 max_loss = (short_strike - long_strike) - net_credit
                 
-                if net_credit > 0 and max_loss > 0:  # Valid bull put spread
+                # Only include spreads with reasonable metrics
+                if (net_credit > 0.25 and  # Minimum credit
+                    max_loss > 0 and max_loss < short_strike * 0.05 and  # Max loss < 5% of strike
+                    short_strike < current_price):  # Strike below current price
+                    
                     risk_reward = max_profit / max_loss
                     
                     optimal_spreads.append({
@@ -418,9 +429,10 @@ def find_optimal_put_spreads(current_price, puts_data, spread_type='bull', min_d
             long_premium = (long_put['bid'] + long_put['ask']) / 2
             
             # Find suitable short strikes (lower than long strike)
+            # CRITICAL FIX: Reduced max width from 15% to 5% for realistic spreads
             short_candidates = liquid_puts[
                 (liquid_puts['strike'] < long_strike) &
-                (liquid_puts['strike'] >= long_strike * 0.85)  # Max 15% width
+                (liquid_puts['strike'] >= long_strike * 0.95)  # MAX 5% width instead of 15%
             ]
             
             for j, short_put in short_candidates.iterrows():
@@ -432,7 +444,10 @@ def find_optimal_put_spreads(current_price, puts_data, spread_type='bull', min_d
                 max_profit = (long_strike - short_strike) - net_debit
                 max_loss = net_debit
                 
-                if net_debit > 0 and max_profit > 0:  # Valid bear put spread
+                # Only include spreads with reasonable metrics
+                if (net_debit > 0.25 and  # Minimum debit
+                    max_profit > 0 and max_loss < long_strike * 0.05):  # Max loss < 5% of strike
+                    
                     risk_reward = max_profit / max_loss
                     
                     optimal_spreads.append({
@@ -451,10 +466,14 @@ def find_optimal_put_spreads(current_price, puts_data, spread_type='bull', min_d
                         'long_volume': long_put['volume']
                     })
     
-    # Sort by risk-reward ratio
+    # Sort by risk-reward ratio and filter for best options
     optimal_spreads.sort(key=lambda x: x['risk_reward'], reverse=True)
     
-    return optimal_spreads[:10]  # Return top 10
+    # Filter out spreads with very poor risk-reward or too wide spreads
+    filtered_spreads = [s for s in optimal_spreads 
+                       if s['risk_reward'] > 0.20 and s['width'] < current_price * 0.05]
+    
+    return filtered_spreads[:10]  # Return top 10
 
 def render_put_spread_analysis_tab(results, vix_data, session_tickers):
     """Render the Put Spread Analysis tab"""
@@ -575,17 +594,17 @@ def render_put_spread_analysis_tab(results, vix_data, session_tickers):
     with strategy_col2:
         # Initialize analysis mode in session state if not exists
         if "put_analysis_mode_value" not in st.session_state:
-            st.session_state.put_analysis_mode_value = "Manual Selection"
+            st.session_state.put_analysis_mode_value = "Optimal Spreads Table"
         
         analysis_mode = st.selectbox(
             "Analysis Mode:",
-            ["Manual Selection", "Quick Analysis"],
-            index=["Manual Selection", "Quick Analysis"].index(st.session_state.put_analysis_mode_value),
+            ["Optimal Spreads Table", "Manual Selection"],
+            index=["Optimal Spreads Table", "Manual Selection"].index(st.session_state.put_analysis_mode_value),
             key="put_analysis_mode",
             on_change=lambda: setattr(st.session_state, 'put_analysis_mode_value', st.session_state.put_analysis_mode)
         )
     
-    # === VOLATILITY ESTIMATION ===
+    # === VOLATILITY ANALYSIS (ALWAYS EXECUTED) ===
     st.markdown("#### 📊 Volatility Analysis")
     
     vol_col1, vol_col2, vol_col3 = st.columns(3)
@@ -633,56 +652,178 @@ def render_put_spread_analysis_tab(results, vix_data, session_tickers):
             key="put_vol_override"
         )
     
-    # === STRIKE SELECTION ===
-    st.markdown("#### ⚙️ Strike Selection")
-    
-    # Filter liquid puts for manual selection
-    liquid_puts = puts_data[
-        (puts_data['volume'] > 5) & 
-        (puts_data['openInterest'] > 20) &
-        (puts_data['bid'] > 0.01)
-    ].copy() if not puts_data.empty else pd.DataFrame()
-    
-    if liquid_puts.empty:
-        st.error("No liquid put options found")
-        return
-    
-    manual_col1, manual_col2 = st.columns(2)
-    
-    available_strikes = sorted(liquid_puts['strike'].unique(), reverse=True)
-    
-    with manual_col1:
-        short_strike = st.selectbox(
-            "Short Put Strike:",
-            available_strikes,
-            index=0,
-            key="manual_short_strike"
+    # === OPTIMAL SPREADS TABLE ===
+    if analysis_mode == "Optimal Spreads Table":
+        st.markdown("#### 📊 Optimal Put Spread Strategies")
+        
+        # Generate optimal spreads
+        optimal_spreads = find_optimal_put_spreads(
+            current_price, 
+            puts_data, 
+            'bull' if spread_type == "Bull Put Spread" else 'bear'
         )
         
-        short_put_data = liquid_puts[liquid_puts['strike'] == short_strike].iloc[0]
-        short_premium = (short_put_data['bid'] + short_put_data['ask']) / 2
-        st.write(f"Premium: ${short_premium:.2f}")
-    
-    with manual_col2:
-        # Filter long strikes based on spread type
-        if spread_type == "Bull Put Spread":
-            long_strikes = [s for s in available_strikes if s < short_strike]
+        if optimal_spreads:
+            # Convert to DataFrame for display
+            spreads_display = []
+            for i, spread in enumerate(optimal_spreads[:8]):  # Show top 8 options
+                spreads_display.append({
+                    '#': i + 1,
+                    'Short Strike': f"${spread['short_strike']:.2f}",
+                    'Long Strike': f"${spread['long_strike']:.2f}",
+                    'Width': f"${spread['width']:.2f}",
+                    'Net Credit' if spread['type'] == 'Bull Put' else 'Net Debit': f"${abs(spread.get('net_credit', spread.get('net_debit', 0))):.2f}",
+                    'Max Profit': f"${spread['max_profit']:.2f}",
+                    'Max Loss': f"${spread['max_loss']:.2f}",
+                    'Breakeven': f"${spread['breakeven']:.2f}",
+                    'R/R Ratio': f"{spread['risk_reward']:.2f}",
+                    'Short Vol': int(spread['short_volume']),
+                    'Long Vol': int(spread['long_volume'])
+                })
+            
+            spreads_df = pd.DataFrame(spreads_display)
+            
+            # Display table with selection
+            st.markdown("**Select a strategy from the table below:**")
+            
+            # Use st.dataframe with selection
+            event = st.dataframe(
+                spreads_df,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row"
+            )
+            
+            # Handle selection
+            if event.selection.rows:
+                selected_idx = event.selection.rows[0]
+                selected_spread = optimal_spreads[selected_idx]
+                
+                st.success(f"✅ Selected Strategy #{selected_idx + 1}")
+                
+                # Set the selected strikes for analysis
+                short_strike = selected_spread['short_strike']
+                long_strike = selected_spread['long_strike']
+                short_premium = selected_spread['short_premium']
+                long_premium = selected_spread['long_premium']
+                
+                # Display selected strategy details
+                sel_col1, sel_col2, sel_col3 = st.columns(3)
+                with sel_col1:
+                    st.metric("Selected Spread", f"${short_strike:.2f} / ${long_strike:.2f}")
+                with sel_col2:
+                    st.metric("Strategy Width", f"${selected_spread['width']:.2f}")
+                with sel_col3:
+                    credit_debit = "Credit" if selected_spread['type'] == 'Bull Put' else "Debit"
+                    amount = abs(selected_spread.get('net_credit', selected_spread.get('net_debit', 0)))
+                    st.metric(f"Net {credit_debit}", f"${amount:.2f}")
+                
+            else:
+                st.info("👆 Click on a row in the table above to select a strategy for detailed analysis")
+                return
+                
         else:
-            long_strikes = [s for s in available_strikes if s > short_strike]
+            st.warning("No optimal spreads found with current criteria. Try Manual Selection mode.")
+            return
+    
+    # === MANUAL STRIKE SELECTION ===
+    else:  # Manual Selection mode
+        st.markdown("#### ⚙️ Manual Strike Selection")
         
-        if not long_strikes:
-            st.error("No suitable long strikes available")
+        # Filter liquid puts for manual selection
+        liquid_puts = puts_data[
+            (puts_data['volume'] > 5) & 
+            (puts_data['openInterest'] > 20) &
+            (puts_data['bid'] > 0.01)
+        ].copy() if not puts_data.empty else pd.DataFrame()
+        
+        if liquid_puts.empty:
+            st.error("No liquid put options found")
             return
         
-        long_strike = st.selectbox(
-            "Long Put Strike:",
-            long_strikes,
-            key="manual_long_strike"
-        )
+        manual_col1, manual_col2 = st.columns(2)
         
-        long_put_data = liquid_puts[liquid_puts['strike'] == long_strike].iloc[0]
-        long_premium = (long_put_data['bid'] + long_put_data['ask']) / 2
-        st.write(f"Premium: ${long_premium:.2f}")
+        # FIXED: Much tighter strike width criteria (5% max instead of 15%)
+        if spread_type == "Bull Put Spread":
+            # Bull Put Spread: BOTH strikes should be BELOW current price
+            # Short strike should be closer to current price (higher value)
+            # Long strike should be further from current price (lower value)
+            available_strikes_for_short = sorted([s for s in liquid_puts['strike'].unique() 
+                                                if s < current_price * 0.98], reverse=True)  # Below current price
+            if not available_strikes_for_short:
+                st.error(f"No put strikes available below current price ${current_price:.2f} for Bull Put Spread")
+                return
+        else:
+            # Bear Put Spread: Strikes can be above current price for more aggressive bearish plays
+            # But we'll still start with below-current-price strikes for conservative approach
+            available_strikes_for_short = sorted([s for s in liquid_puts['strike'].unique() 
+                                                if s <= current_price * 1.02], reverse=True)  # Near/below current price
+            if not available_strikes_for_short:
+                st.error(f"No suitable put strikes available for Bear Put Spread")
+                return
+        
+        with manual_col1:
+            st.markdown(f"**Current Price: ${current_price:.2f}**")
+            short_strike = st.selectbox(
+                "Short Put Strike:",
+                available_strikes_for_short,
+                index=0,
+                key="manual_short_strike",
+                help=f"For {spread_type}: Strike to SELL"
+            )
+            
+            short_put_data = liquid_puts[liquid_puts['strike'] == short_strike].iloc[0]
+            short_premium = (short_put_data['bid'] + short_put_data['ask']) / 2
+            st.write(f"Premium: ${short_premium:.2f}")
+            st.write(f"Distance: {((short_strike - current_price) / current_price * 100):+.1f}% from current")
+        
+        with manual_col2:
+            # Filter long strikes based on spread type and selected short strike
+            # CRITICAL FIX: Reduced max width from 15% to 5% for realistic spreads
+            if spread_type == "Bull Put Spread":
+                # Bull Put: Long strike must be LOWER than short strike (MAX 5% WIDTH)
+                long_strikes = [s for s in liquid_puts['strike'].unique() 
+                              if s < short_strike and s >= short_strike * 0.95]  # MAX 5% width instead of 15%
+            else:
+                # Bear Put: Long strike must be HIGHER than short strike (MAX 5% WIDTH)
+                long_strikes = [s for s in liquid_puts['strike'].unique() 
+                              if s > short_strike and s <= short_strike * 1.05]  # MAX 5% width instead of 15%
+            
+            if not long_strikes:
+                st.error(f"No suitable long strikes available for {spread_type}")
+                st.info(f"Short strike: ${short_strike:.2f}, Need {'lower' if spread_type == 'Bull Put Spread' else 'higher'} strikes within 5% width")
+                return
+            
+            # Sort appropriately
+            long_strikes = sorted(long_strikes, reverse=(spread_type == "Bear Put Spread"))
+            
+            long_strike = st.selectbox(
+                "Long Put Strike:",
+                long_strikes,
+                key="manual_long_strike",
+                help=f"For {spread_type}: Strike to BUY"
+            )
+            
+            long_put_data = liquid_puts[liquid_puts['strike'] == long_strike].iloc[0]
+            long_premium = (long_put_data['bid'] + long_put_data['ask']) / 2
+            st.write(f"Premium: ${long_premium:.2f}")
+            st.write(f"Distance: {((long_strike - current_price) / current_price * 100):+.1f}% from current")
+        
+        # Show spread summary
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Spread Type", spread_type)
+        with col2:
+            st.metric("Spread Width", f"${abs(short_strike - long_strike):.2f}")
+        with col3:
+            if spread_type == "Bull Put Spread":
+                net_premium = short_premium - long_premium
+                st.metric("Net Credit", f"${net_premium:.2f}", "Bullish Strategy")
+            else:
+                net_premium = long_premium - short_premium  
+                st.metric("Net Debit", f"${net_premium:.2f}", "Bearish Strategy")
     
     # === COMPREHENSIVE ANALYSIS ===
     st.markdown("#### 📈 Comprehensive Put Spread Analysis")
