@@ -1044,11 +1044,11 @@ def main():
     vix_data = getattr(st.session_state, 'vix_data', None)
     session_tickers = getattr(st.session_state, 'selected_tickers', selected_tickers)
     
-    # CREATE TABS - Show all 8 tabs
+    # CREATE TABS - Show all 9 tabs including new Chart Analysis
     if results and len(results) > 0:
         st.success("📈 Analysis Complete! All tabs are now available.")
         
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
             "📊 Summary", 
             "📈 Price Charts", 
             "🔍 Detailed Stats", 
@@ -1056,7 +1056,8 @@ def main():
             "📉 VIX Analysis",
             "🎯 Options Strategy",
             "📐 Put Spread Analysis",
-            "🦅 Iron Condor Playbook"
+            "🦅 Iron Condor Playbook",
+            "📊 Chart Analysis"
         ])
         
         with tab1:
@@ -1224,6 +1225,29 @@ def main():
                     st.warning("Iron Condor analysis module not available. Install iron_condor_analysis.py")
                 
                 st.info("Please ensure tabs/tab8_iron_condor_playbook.py is available for full functionality.")
+
+        with tab9:
+            # Chart Analysis Tab - NEW AI-Powered Feature
+            try:
+                from tabs.tab9_chart_analysis import render_chart_analysis_tab
+                render_chart_analysis_tab(results, vix_data, session_tickers)
+            except ImportError:
+                st.warning("⚠️ Modular Tab 9 not available. Using fallback implementation.")
+                st.subheader("📊 AI Chart Analysis (Fallback)")
+                
+                st.info("""
+                **🚀 NEW FEATURE: AI-Powered Chart Analysis**
+                
+                This tab provides:
+                - 📤 Image upload for stock charts (PNG/JPG)
+                - 🧠 OpenAI o3-mini vision model analysis
+                - 📊 Pattern recognition and technical analysis
+                - 📈 Price action and volume analysis
+                - 🎯 Options strategy recommendations
+                - ⚠️ Risk management guidelines
+                
+                Please ensure tabs/tab9_chart_analysis.py and core/chart_analyzer.py are available.
+                """)
     
     else:
         # No analysis run yet
@@ -1235,7 +1259,7 @@ def main():
                 📊 Enhanced Stock Volatility Analyzer
             </h2>
             <p style="color: var(--text-secondary); margin: 0.5rem 0 0 0; font-size: 1.1rem;">
-                ℹ️ Click "Run Enhanced Analysis" in the sidebar to unlock all 8 tabs with comprehensive features.
+                ℹ️ Click "Run Enhanced Analysis" in the sidebar to unlock all 9 tabs with comprehensive features.
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -1251,7 +1275,8 @@ def main():
             "📉 **VIX Analysis**: Market condition assessment",
             "🎯 **Options Strategy**: 95% probability analysis framework",
             "📐 **Put Spread Analysis**: Advanced spread strategy analysis",
-            "🦅 **Iron Condor Playbook**: Complete IC trading system"
+            "🦅 **Iron Condor Playbook**: Complete IC trading system",
+            "📊 **Chart Analysis**: AI-powered chart pattern recognition (NEW!)"
         ]
         
         for feature in features:
