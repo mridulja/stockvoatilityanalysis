@@ -55,6 +55,118 @@ def render_chart_analysis_tab(results, vix_data, session_tickers):
         st.info("💡 This feature requires OpenAI API access and the chart analyzer module.")
         return
     
+    # === DEBUG & MODEL INFO SECTION ===
+    with st.expander("🔧 Debug & Model Information"):
+        if CHART_ANALYZER_AVAILABLE:
+            try:
+                analyzer = ChartAnalyzer()
+                model_info = analyzer.get_model_info()
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**🤖 Model Configuration:**")
+                    st.code(f"Primary: {model_info['primary_model']}")
+                    st.code(f"Fallback: {model_info['fallback_model']}")
+                    
+                    # Show vision support
+                    vision_support = model_info['vision_support']
+                    st.markdown("**👁️ Vision Support:**")
+                    if vision_support['primary_supports_vision']:
+                        st.success(f"✅ {model_info['primary_model']} supports vision")
+                    else:
+                        st.warning(f"⚠️ {model_info['primary_model']} does NOT support vision")
+                    
+                    if vision_support['fallback_supports_vision']:
+                        st.success(f"✅ {model_info['fallback_model']} supports vision")
+                    else:
+                        st.warning(f"⚠️ {model_info['fallback_model']} does NOT support vision")
+                
+                with col2:
+                    st.markdown("**📊 Client Information:**")
+                    st.code(f"Client Type: {model_info['openai_client_type']}")
+                    
+                    # Add model switching options
+                    st.markdown("**🔄 Model Management:**")
+                    if st.button("📋 List Available Models"):
+                        analyzer.list_available_models()
+                        st.info("Check console for detailed model information")
+                    
+                    # Quick model switch
+                    st.markdown("**Quick Model Switch:**")
+                    if st.button("🔄 Switch to GPT-4o"):
+                        analyzer.set_model("gpt-4o")
+                        st.success("Switched to GPT-4o (vision supported)")
+                        st.rerun()
+                    
+                    if st.button("🔄 Switch to GPT-4o-mini"):
+                        analyzer.set_model("gpt-4o-mini")
+                        st.success("Switched to GPT-4o-mini (vision supported)")
+                        st.rerun()
+                
+                # Important note about GPT-5-mini
+                if model_info['primary_model'] == 'gpt-5-mini':
+                    st.success("""
+                    🎉 **Great News**: GPT-5-mini now supports vision and is multimodal!
+                    This means you get the latest reasoning capabilities PLUS image analysis.
+                    """)
+                
+                # Show current model capabilities
+                if model_info['vision_support']['primary_supports_vision']:
+                    if 'gpt-5' in model_info['primary_model']:
+                        st.success(f"🚀 Current primary model ({model_info['primary_model']}) is the latest GPT-5 with vision support!")
+                    else:
+                        st.success(f"✅ Current primary model ({model_info['primary_model']}) supports vision - perfect for chart analysis!")
+                else:
+                    st.error(f"❌ Current primary model ({model_info['primary_model']}) does NOT support vision - cannot analyze charts!")
+                
+                # Add text-only analysis option
+                st.markdown("---")
+                st.markdown("**📝 Text-Only Analysis (GPT-5-mini):**")
+                st.markdown("You can also use GPT-5-mini for text analysis (though it now supports images too!):")
+                
+                text_content = st.text_area(
+                    "Text to Analyze:",
+                    placeholder="Paste text content here for analysis (e.g., earnings report, news article, etc.)",
+                    height=100,
+                    key="text_analysis_input"
+                )
+                
+                if st.button("🧠 Analyze Text with GPT-5-mini"):
+                    if text_content.strip():
+                        try:
+                            with st.spinner("Analyzing text with GPT-5-mini..."):
+                                analysis_result = analyzer.analyze_text_only(
+                                    text_content=text_content,
+                                    analysis_type="deep",
+                                    additional_context="",
+                                    system_prompt=""
+                                )
+                                
+                                # Store results
+                                if 'chart_analysis_results' not in st.session_state:
+                                    st.session_state.chart_analysis_results = {}
+                                
+                                analysis_key = f"text_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                                st.session_state.chart_analysis_results[analysis_key] = {
+                                    'result': analysis_result,
+                                    'mode': 'Text Analysis',
+                                    'context': '',
+                                    'system_prompt': '',
+                                    'filename': 'Text Content',
+                                    'content_type': 'text'
+                                }
+                                
+                                st.success("✅ Text analysis completed!")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Text analysis failed: {str(e)}")
+                    else:
+                        st.warning("Please enter some text to analyze.")
+            except Exception as e:
+                st.error(f"Error getting model info: {str(e)}")
+        else:
+            st.error("Chart Analyzer not available")
+    
     # === IMAGE UPLOAD SECTION ===
     st.markdown("#### 📤 Upload Chart Image")
     
@@ -104,10 +216,66 @@ def render_chart_analysis_tab(results, vix_data, session_tickers):
         with analysis_col2:
             additional_context = st.text_area(
                 "Additional Context (Optional):",
-                placeholder="e.g., Recent earnings, market conditions, specific concerns...",
+                placeholder="e.g., Recent earnings, market conditions, specific concerns. Always think critically, before you answer.",
                 height=100,
                 help="Provide any additional context about the stock or market conditions"
             )
+        
+        # System prompt input
+        st.markdown("#### 🎯 Custom System Prompt (Optional)")
+        
+        # Add button to load default system prompt
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            system_prompt = st.text_area(
+                "System Prompt:",
+                placeholder="Customize how the AI should approach the analysis (e.g., 'Focus on swing trading patterns' or 'Emphasize risk management')",
+                height=80,
+                help="Customize the AI's analysis approach and focus areas"
+            )
+        with col2:
+            if st.button("📋 Load Default", help="Load the professional default system prompt"):
+                if CHART_ANALYZER_AVAILABLE:
+                    analyzer = ChartAnalyzer()
+                    default_prompt = analyzer.get_default_system_prompt()
+                    st.session_state.default_system_prompt = default_prompt
+                    st.rerun()
+        
+        # Show default prompt if loaded
+        if 'default_system_prompt' in st.session_state:
+            with st.expander("📋 Default System Prompt (Click to copy)"):
+                st.code(st.session_state.default_system_prompt, language="text")
+                if st.button("📋 Copy to Input"):
+                    st.session_state.system_prompt_input = st.session_state.default_system_prompt
+                    st.rerun()
+        
+        # Show example system prompts
+        with st.expander("💡 Example System Prompts"):
+            st.markdown("""
+            **🎯 Swing Trading Focus:**
+            ```
+            Focus on swing trading patterns with 1-4 week timeframes. Emphasize support/resistance levels and breakout setups. Prioritize risk/reward ratios above 2:1.
+            ```
+            
+            **📊 Day Trading Focus:**
+            ```
+            Analyze for intraday trading opportunities. Focus on momentum indicators, volume spikes, and short-term support/resistance. Emphasize quick entry/exit strategies.
+            ```
+            
+            **💰 Income Generation:**
+            ```
+            Prioritize options selling strategies for income generation. Focus on high-probability setups with defined risk. Emphasize cash-secured puts and covered calls.
+            ```
+            
+            **⚠️ Conservative Approach:**
+            ```
+            Provide conservative, risk-averse analysis. Emphasize capital preservation over aggressive gains. Focus on high-probability setups with tight risk management.
+            ```
+            """)
+        
+        # Use the loaded prompt if available
+        if 'system_prompt_input' in st.session_state:
+            system_prompt = st.session_state.system_prompt_input
         
         # Analysis button
         analyze_button = st.button(
@@ -119,7 +287,7 @@ def render_chart_analysis_tab(results, vix_data, session_tickers):
         if analyze_button:
             # Reset the uploaded file in session state to prevent re-uploads
             if uploaded_file is not None:
-                _perform_chart_analysis(uploaded_file, analysis_mode, additional_context)
+                _perform_chart_analysis(uploaded_file, analysis_mode, additional_context, system_prompt)
             else:
                 st.error("Please upload a chart image first.")
     
@@ -169,6 +337,30 @@ def render_chart_analysis_tab(results, vix_data, session_tickers):
     else:
         _display_chart_analysis_fallback()
     
+    # === CONSOLE LOG VIEWER ===
+    with st.expander("📋 Console Log Viewer (Debug Output)"):
+        st.markdown("""
+        **Console logs from the ChartAnalyzer will appear here during analysis.**
+        This shows which model is being used, API calls, and processing details.
+        """)
+        
+        # Create a placeholder for console logs
+        if 'console_logs' not in st.session_state:
+            st.session_state.console_logs = []
+        
+        # Display existing logs
+        if st.session_state.console_logs:
+            st.markdown("**Recent Logs:**")
+            for log in st.session_state.console_logs[-10:]:  # Show last 10 logs
+                st.code(log, language="text")
+        else:
+            st.info("No logs yet. Run a chart analysis to see debug output.")
+        
+        # Clear logs button
+        if st.button("🗑️ Clear Logs"):
+            st.session_state.console_logs = []
+            st.rerun()
+    
     # === STRATEGY IMPLEMENTATION GUIDE ===
     with st.expander("📋 Options Strategy Implementation Guide"):
         st.markdown("""
@@ -198,7 +390,7 @@ def render_chart_analysis_tab(results, vix_data, session_tickers):
         5. **Earnings**: Avoid holding through earnings unless specifically trading the event
         """)
 
-def _perform_chart_analysis(uploaded_file, analysis_mode, additional_context):
+def _perform_chart_analysis(uploaded_file, analysis_mode, additional_context, system_prompt):
     """Perform chart analysis using AI"""
     
     try:
@@ -215,7 +407,8 @@ def _perform_chart_analysis(uploaded_file, analysis_mode, additional_context):
             analysis_result = analyzer.analyze_chart(
                 image_file=uploaded_file,
                 analysis_type=analysis_type,
-                additional_context=additional_context
+                additional_context=additional_context,
+                system_prompt=system_prompt
             )
             
             # Store results in session state
@@ -228,6 +421,7 @@ def _perform_chart_analysis(uploaded_file, analysis_mode, additional_context):
                 'result': analysis_result,
                 'mode': analysis_mode,
                 'context': additional_context,
+                'system_prompt': system_prompt,
                 'filename': uploaded_file.name
             }
             
@@ -287,6 +481,11 @@ def _display_chart_analysis_results():
                     if timestamp:
                         dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                         st.metric("Generated", dt.strftime('%H:%M:%S'))
+                
+                # Show system prompt if used
+                if analysis_data.get('system_prompt'):
+                    st.markdown("**🔧 System Prompt Used:**")
+                    st.code(analysis_data['system_prompt'], language="text")
     
     else:
         if AI_FORMATTER_AVAILABLE:
@@ -319,6 +518,11 @@ def _display_chart_analysis_fallback():
         # Display analysis content
         analysis_content = analysis_result.get('analysis_content', 'No analysis available')
         st.markdown(analysis_content)
+        
+        # Show system prompt if used
+        if analysis_data.get('system_prompt'):
+            with st.expander("🔧 System Prompt Used"):
+                st.code(analysis_data['system_prompt'], language="text")
         
         # Clear button
         if st.button("🗑️ Clear Analysis"):
@@ -393,6 +597,7 @@ Analysis ID: {key}
 Filename: {data['filename']}
 Mode: {data['mode']}
 Context: {data['context']}
+System Prompt: {data.get('system_prompt', 'None')}
 Results:
 {data['result'].get('analysis_content', 'No content')}
 {'='*50}
