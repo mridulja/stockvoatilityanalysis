@@ -21,6 +21,15 @@ import numpy as np
 from datetime import datetime, timedelta
 import warnings
 import os
+import base64
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+from PIL import Image as PILImage
+import io
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -48,6 +57,7 @@ def render_chart_analysis_tab(results, vix_data, session_tickers):
     
     st.markdown("### 📊 AI-Powered Chart Analysis")
     st.markdown("Upload your stock chart images for professional technical analysis and options strategy recommendations.")
+    st.info("💡 **New Features**: AI automatically detects asset info during analysis! Download professional PDF reports with high-quality images, proper markdown formatting, comprehensive metadata, and technical information!")
     
     # Check if chart analyzer is available
     if not CHART_ANALYZER_AVAILABLE:
@@ -102,6 +112,8 @@ def render_chart_analysis_tab(results, vix_data, session_tickers):
                         analyzer.set_model("gpt-4o-mini")
                         st.success("Switched to GPT-4o-mini (vision supported)")
                         st.rerun()
+                    
+
                 
                 # Important note about GPT-5-mini
                 if model_info['primary_model'] == 'gpt-5-mini':
@@ -404,12 +416,19 @@ def _perform_chart_analysis(uploaded_file, analysis_mode, additional_context, sy
             analysis_type = "quick" if analysis_mode == "Quick Analysis" else "deep"
             
             # Perform analysis
-            analysis_result = analyzer.analyze_chart(
-                image_file=uploaded_file,
-                analysis_type=analysis_type,
-                additional_context=additional_context,
-                system_prompt=system_prompt
-            )
+            with st.spinner("🧠 Analyzing chart with AI..."):
+                analysis_result = analyzer.analyze_chart(
+                    image_file=uploaded_file,
+                    analysis_type=analysis_type,
+                    additional_context=additional_context,
+                    system_prompt=system_prompt
+                )
+            
+            # Extract asset info from the analysis content
+            analysis_content = analysis_result.get('analysis_content', '')
+            asset_info = analyzer._parse_asset_info_from_analysis(analysis_content)
+            company_name = asset_info.get('company_name', 'Unknown')
+            ticker_from_chart = asset_info.get('ticker_symbol', 'Unknown')
             
             # Store results in session state
             if 'chart_analysis_results' not in st.session_state:
@@ -422,10 +441,14 @@ def _perform_chart_analysis(uploaded_file, analysis_mode, additional_context, sy
                 'mode': analysis_mode,
                 'context': additional_context,
                 'system_prompt': system_prompt,
-                'filename': uploaded_file.name
+                'filename': uploaded_file.name,
+                'image_file': uploaded_file,  # Store the image file for PDF generation
+                'company_name': company_name,  # Store extracted company name
+                'ticker_symbol': ticker_from_chart  # Store extracted ticker
             }
             
             st.success("✅ Chart analysis completed successfully!")
+            st.info(f"📊 Detected: {company_name} ({ticker_from_chart})")
             # Force a rerun to show the results immediately
             st.rerun()
             
@@ -482,10 +505,69 @@ def _display_chart_analysis_results():
                         dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                         st.metric("Generated", dt.strftime('%H:%M:%S'))
                 
+                # Show extracted company info
+                company_name = analysis_data.get('company_name', 'Unknown')
+                ticker_from_chart = analysis_data.get('ticker_symbol', 'Unknown')
+                
+                if company_name != 'Unknown' or ticker_from_chart != 'Unknown':
+                    st.markdown("**🏢 Extracted from Chart:**")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Company", company_name)
+                    with col2:
+                        st.metric("Ticker", ticker_from_chart)
+                
                 # Show system prompt if used
                 if analysis_data.get('system_prompt'):
                     st.markdown("**🔧 System Prompt Used:**")
                     st.code(analysis_data['system_prompt'], language="text")
+                
+                # PDF Download Section
+                st.markdown("---")
+                st.markdown("#### 📄 Export Analysis Report")
+                
+                # Use extracted ticker from chart or fallback to filename
+                ticker_symbol = analysis_data.get('ticker_symbol', 'Unknown')
+                if ticker_symbol == 'Unknown':
+                    ticker_symbol = get_ticker_from_filename(analysis_data.get('filename', ''))
+                
+                # Get company name
+                company_name = analysis_data.get('company_name', 'Unknown')
+                
+                # Generate and download PDF button
+                if st.button("📥 Generate & Download PDF Report", type="secondary", help="Generate and download a professional PDF report with metadata and disclaimer"):
+                    with st.spinner("Generating PDF report..."):
+                        try:
+                            # Debug info
+                            st.info(f"🔍 Debug: Generating PDF for ticker: {ticker_symbol}")
+                            st.info(f"🔍 Debug: Analysis mode: {analysis_data.get('mode', 'N/A')}")
+                            
+                            pdf_bytes, pdf_filename = generate_chart_analysis_pdf(
+                                analysis_data, 
+                                analysis_result, 
+                                ticker_symbol
+                            )
+                            
+                            if pdf_bytes and pdf_filename:
+                                # Create download button
+                                st.download_button(
+                                    label="💾 Download PDF Report",
+                                    data=pdf_bytes,
+                                    file_name=pdf_filename,
+                                    mime="application/pdf",
+                                    help="Click to download your AI chart analysis report"
+                                )
+                                
+                                st.success(f"✅ PDF report generated successfully! Filename: {pdf_filename}")
+                                st.info("📋 Report includes: Chart image, analysis results, metadata, context, technical information (tokens used), and legal disclaimer")
+                            else:
+                                st.error("❌ Failed to generate PDF report")
+                                st.error("🔍 Debug: PDF generation returned None values")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Error generating PDF: {str(e)}")
+                            st.error(f"🔍 Debug: Exception type: {type(e).__name__}")
+                            st.info("💡 Make sure you have the required PDF libraries installed")
     
     else:
         if AI_FORMATTER_AVAILABLE:
@@ -523,6 +605,53 @@ def _display_chart_analysis_fallback():
         if analysis_data.get('system_prompt'):
             with st.expander("🔧 System Prompt Used"):
                 st.code(analysis_data['system_prompt'], language="text")
+        
+        # PDF Download Section
+        st.markdown("---")
+        st.markdown("#### 📄 Export Analysis Report")
+        
+        # Use extracted ticker from chart or fallback to filename
+        ticker_symbol = analysis_data.get('ticker_symbol', 'Unknown')
+        if ticker_symbol == 'Unknown':
+            ticker_symbol = get_ticker_from_filename(analysis_data.get('filename', ''))
+        
+        # Get company name
+        company_name = analysis_data.get('company_name', 'Unknown')
+        
+        # Generate and download PDF button
+        if st.button("📥 Generate & Download PDF Report", type="secondary", help="Generate and download a professional PDF report with metadata and disclaimer"):
+            with st.spinner("Generating PDF report..."):
+                try:
+                    # Debug info
+                    st.info(f"🔍 Debug: Generating PDF for ticker: {ticker_symbol}")
+                    st.info(f"🔍 Debug: Analysis mode: {analysis_data.get('mode', 'N/A')}")
+                    
+                    pdf_bytes, pdf_filename = generate_chart_analysis_pdf(
+                        analysis_data, 
+                        analysis_result, 
+                        ticker_symbol
+                    )
+                    
+                    if pdf_bytes and pdf_filename:
+                        # Create download button
+                        st.download_button(
+                            label="💾 Download PDF Report",
+                            data=pdf_bytes,
+                            file_name=pdf_filename,
+                            mime="application/pdf",
+                            help="Click to download your AI chart analysis report"
+                        )
+                        
+                        st.success(f"✅ PDF report generated successfully! Filename: {pdf_filename}")
+                        st.info("📋 Report includes: Chart image, analysis results, metadata, context, technical information (tokens used), and legal disclaimer")
+                    else:
+                        st.error("❌ Failed to generate PDF report")
+                        st.error("🔍 Debug: PDF generation returned None values")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error generating PDF: {str(e)}")
+                    st.error(f"🔍 Debug: Exception type: {type(e).__name__}")
+                    st.info("💡 Make sure you have the required PDF libraries installed")
         
         # Clear button
         if st.button("🗑️ Clear Analysis"):
@@ -603,4 +732,359 @@ Results:
 {'='*50}
         """)
     
-    return '\n'.join(export_data) 
+    return '\n'.join(export_data)
+
+def generate_chart_analysis_pdf(analysis_data, analysis_result, ticker_symbol="UNKNOWN"):
+    """Generate a professional PDF report for chart analysis results"""
+    
+    try:
+        # Debug info
+        print(f"🔍 PDF Generation Debug: Starting PDF generation for ticker: {ticker_symbol}")
+        print(f"🔍 PDF Generation Debug: Analysis data keys: {list(analysis_data.keys())}")
+        print(f"🔍 PDF Generation Debug: Analysis result keys: {list(analysis_result.keys())}")
+        
+        # Get company info
+        company_name = analysis_data.get('company_name', 'Unknown Company')
+        
+        # Create a better PDF filename
+        safe_ticker = ticker_symbol.replace('/', '_').replace('\\', '_')
+        pdf_filename = f"chart_analysis_{safe_ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        
+        # Create the PDF document
+        doc = SimpleDocTemplate(pdf_filename, pagesize=A4)
+        story = []
+        
+        # Get styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            spaceAfter=30,
+            alignment=TA_CENTER,
+            textColor=colors.darkblue
+        )
+        
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            spaceAfter=12,
+            spaceBefore=20,
+            textColor=colors.darkblue
+        )
+        
+        normal_style = ParagraphStyle(
+            'CustomNormal',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=6,
+            alignment=TA_JUSTIFY
+        )
+        
+        # Add custom style for analysis headers
+        analysis_header_style = ParagraphStyle(
+            'AnalysisHeader',
+            parent=styles['Heading3'],
+            fontSize=12,
+            spaceAfter=8,
+            spaceBefore=16,
+            textColor=colors.darkred,
+            fontName='Helvetica-Bold'
+        )
+        
+        # Title
+        story.append(Paragraph("AI-Powered Chart Analysis Report", title_style))
+        story.append(Spacer(1, 20))
+        
+        # Metadata Table
+        metadata_data = [
+            ['Analysis Date', datetime.now().strftime('%B %d, %Y')],
+            ['Analysis Time', datetime.now().strftime('%I:%M %p')],
+            ['Company Name', company_name],
+            ['Ticker Symbol', ticker_symbol],
+            ['Analysis Mode', analysis_data.get('mode', 'N/A')],
+            ['AI Model', analysis_result.get('metadata', {}).get('model', 'GPT-5-mini')],
+            ['Analysis Type', analysis_result.get('metadata', {}).get('analysis_type', 'N/A')],
+            ['Analysis Timeframe', 'Quick Analysis' if analysis_data.get('mode') == 'Quick Analysis' else 'Deep Technical Analysis']
+        ]
+        
+        metadata_table = Table(metadata_data, colWidths=[2*inch, 3*inch])
+        metadata_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        
+        story.append(Paragraph("Report Metadata", heading_style))
+        story.append(metadata_table)
+        story.append(Spacer(1, 20))
+        
+        # Chart Image
+        story.append(Paragraph("Chart Analysis", heading_style))
+        try:
+            # Convert uploaded file to PIL Image for PDF
+            image_file = analysis_data.get('image_file')
+            if image_file:
+                # Reset file pointer to beginning
+                image_file.seek(0)
+                
+                # Convert to PIL Image
+                pil_image = PILImage.open(image_file)
+                
+                # Convert to RGB if necessary (for better PDF compatibility)
+                if pil_image.mode != 'RGB':
+                    pil_image = pil_image.convert('RGB')
+                
+                # Calculate optimal size for PDF (higher quality)
+                # Use 300 DPI for better quality
+                dpi = 300
+                max_width_inches = 6.0
+                max_height_inches = 8.0
+                
+                # Calculate dimensions in pixels at 300 DPI
+                max_width_pixels = int(max_width_inches * dpi)
+                max_height_pixels = int(max_height_inches * dpi)
+                
+                # Get original dimensions
+                img_width, img_height = pil_image.size
+                
+                # Calculate scaling factor to fit within bounds while maintaining aspect ratio
+                width_scale = max_width_pixels / img_width
+                height_scale = max_height_pixels / img_height
+                scale_factor = min(width_scale, height_scale, 1.0)  # Don't upscale
+                
+                # Apply scaling if needed
+                if scale_factor < 1.0:
+                    new_width = int(img_width * scale_factor)
+                    new_height = int(img_height * scale_factor)
+                    pil_image = pil_image.resize((new_width, new_height), PILImage.Resampling.LANCZOS)
+                    print(f"🔍 PDF Generation Debug: Image resized from {img_width}x{img_height} to {new_width}x{new_height}")
+                else:
+                    print(f"🔍 PDF Generation Debug: Image kept at original size {img_width}x{img_height}")
+                
+                # Save to BytesIO with high quality
+                img_buffer = io.BytesIO()
+                pil_image.save(img_buffer, format="PNG", optimize=False, quality=95)
+                img_buffer.seek(0)
+                
+                # Calculate PDF dimensions (convert pixels to points at 72 DPI)
+                pdf_width = (pil_image.size[0] / dpi) * 72
+                pdf_height = (pil_image.size[1] / dpi) * 72
+                
+                # Add image to PDF with calculated dimensions
+                pdf_image = Image(img_buffer, width=pdf_width, height=pdf_height)
+                story.append(pdf_image)
+                story.append(Spacer(1, 10))
+                
+                # Add image caption
+                caption_style = ParagraphStyle(
+                    'Caption',
+                    parent=styles['Normal'],
+                    fontSize=9,
+                    spaceAfter=6,
+                    alignment=TA_CENTER,
+                    textColor=colors.grey
+                )
+                story.append(Paragraph(f"Chart Image: {company_name} ({ticker_symbol}) - {analysis_data.get('mode', 'Analysis')} - High Quality (300 DPI)", caption_style))
+                
+                print(f"🔍 PDF Generation Debug: High-quality chart image added successfully using BytesIO")
+                print(f"🔍 PDF Generation Debug: Image dimensions: {pil_image.size[0]}x{pil_image.size[1]} pixels")
+                print(f"🔍 PDF Generation Debug: PDF dimensions: {pdf_width:.1f}x{pdf_height:.1f} points")
+            else:
+                story.append(Paragraph("Chart image not available for this analysis", normal_style))
+                print(f"🔍 PDF Generation Debug: No chart image available")
+        except Exception as e:
+            story.append(Paragraph("Chart image could not be included in the report", normal_style))
+            print(f"🔍 PDF Generation Debug: Error adding chart image: {str(e)}")
+        
+        story.append(Spacer(1, 20))
+        
+        # Analysis Content
+        story.append(Paragraph("Technical Analysis Results", heading_style))
+        
+        # Clean and format the analysis content for PDF
+        analysis_content = analysis_result.get('analysis_content', 'No analysis content available')
+        
+        # Simple markdown parsing for better formatting
+        lines = analysis_content.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                # Empty line - add small spacer
+                story.append(Spacer(1, 6))
+                continue
+            
+            # Parse markdown elements
+            if line.startswith('### '):
+                # H3 header
+                header_text = line.replace('### ', '').strip()
+                story.append(Paragraph(header_text, analysis_header_style))
+                story.append(Spacer(1, 8))
+            
+            elif line.startswith('## '):
+                # H2 header
+                header_text = line.replace('## ', '').strip()
+                story.append(Paragraph(header_text, heading_style))
+                story.append(Spacer(1, 10))
+            
+            elif line.startswith('# '):
+                # H1 header
+                header_text = line.replace('# ', '').strip()
+                story.append(Paragraph(header_text, title_style))
+                story.append(Spacer(1, 12))
+            
+            elif line.startswith('- ') or line.startswith('* '):
+                # Bullet point
+                bullet_text = line.replace('- ', '').replace('* ', '').strip()
+                # Clean up markdown formatting in bullet text
+                bullet_text = bullet_text.replace('**', '').replace('*', '').replace('`', '')
+                story.append(Paragraph(f"• {bullet_text}", normal_style))
+                story.append(Spacer(1, 4))
+            
+            elif line.startswith('**') and line.endswith('**'):
+                # Bold text as small header
+                bold_text = line.replace('**', '').strip()
+                bold_style = ParagraphStyle(
+                    'BoldText',
+                    parent=normal_style,
+                    fontName='Helvetica-Bold',
+                    fontSize=11,
+                    spaceAfter=4,
+                    spaceBefore=8
+                )
+                story.append(Paragraph(bold_text, bold_style))
+                story.append(Spacer(1, 4))
+            
+            else:
+                # Regular paragraph
+                # Clean up markdown formatting
+                clean_line = line.replace('**', '').replace('*', '').replace('`', '')
+                if clean_line.strip():
+                    story.append(Paragraph(clean_line, normal_style))
+                    story.append(Spacer(1, 6))
+        
+        # Additional Context (if provided)
+        if analysis_data.get('context'):
+            story.append(Spacer(1, 20))
+            story.append(Paragraph("Additional Context", heading_style))
+            story.append(Paragraph(analysis_data['context'], normal_style))
+        
+        # Tokens Used Information
+        story.append(Spacer(1, 20))
+        story.append(Paragraph("Technical Information", heading_style))
+        
+        # Get tokens information
+        tokens_used = analysis_result.get('metadata', {}).get('tokens_used', 'N/A')
+        api_duration = analysis_result.get('metadata', {}).get('api_duration_seconds', 'N/A')
+        
+        tokens_info = f"""
+        <b>AI Model Usage:</b><br/>
+        • Tokens Used: {tokens_used}<br/>
+        • API Response Time: {api_duration} seconds<br/>
+        • Model: {analysis_result.get('metadata', {}).get('model', 'GPT-5-mini')}<br/>
+        • Analysis Timestamp: {analysis_result.get('metadata', {}).get('timestamp', 'N/A')}
+        """
+        
+        story.append(Paragraph(tokens_info, normal_style))
+        
+        # Disclaimer
+        story.append(Spacer(1, 30))
+        disclaimer_style = ParagraphStyle(
+            'Disclaimer',
+            parent=styles['Normal'],
+            fontSize=9,
+            spaceAfter=6,
+            alignment=TA_CENTER,
+            textColor=colors.grey
+        )
+        
+        disclaimer_text = """
+        <b>DISCLAIMER:</b><br/>
+        This analysis is generated by artificial intelligence and is for educational and informational purposes only. 
+        It should not be considered as financial advice, investment recommendations, or a solicitation to buy or sell any security. 
+        The analysis is based on technical patterns and historical data, which may not accurately predict future price movements. 
+        Always conduct your own research, consider your risk tolerance, and consult with a qualified financial advisor before making investment decisions. 
+        Past performance does not guarantee future results. Trading options involves substantial risk and may result in the loss of your entire investment.
+        """
+        
+        story.append(Paragraph(disclaimer_text, disclaimer_style))
+        
+        # Build the PDF
+        doc.build(story)
+        
+        # Read the generated PDF
+        with open(pdf_filename, 'rb') as pdf_file:
+            pdf_bytes = pdf_file.read()
+        
+        # Clean up temporary files
+        # The BytesIO object is automatically garbage collected, so no explicit cleanup needed here
+        # if 'img_buffer' in locals() and img_buffer:
+        #     img_buffer.close()
+        
+        # Clean up the PDF file
+        if os.path.exists(pdf_filename):
+            os.remove(pdf_filename)
+            print(f"🔍 PDF Generation Debug: Temporary PDF file cleaned up")
+        
+        # Debug info
+        print(f"🔍 PDF Generation Debug: PDF generated successfully!")
+        print(f"🔍 PDF Generation Debug: PDF size: {len(pdf_bytes)} bytes")
+        print(f"🔍 PDF Generation Debug: Filename: {pdf_filename}")
+        
+        return pdf_bytes, f"chart_analysis_{ticker_symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        
+    except Exception as e:
+        # Clean up any temporary files on error
+        # The BytesIO object is automatically garbage collected, so no explicit cleanup needed here
+        # if 'img_buffer' in locals() and img_buffer:
+        #     try:
+        #         img_buffer.close()
+        #         print(f"🔍 PDF Generation Debug: Cleaned up temp image file on error")
+        #     except:
+        #         pass
+        
+        if 'pdf_filename' in locals() and os.path.exists(pdf_filename):
+            try:
+                os.remove(pdf_filename)
+                print(f"🔍 PDF Generation Debug: Cleaned up temp PDF file on error")
+            except:
+                pass
+        
+        print(f"🔍 PDF Generation Debug: Error occurred: {str(e)}")
+        print(f"🔍 PDF Generation Debug: Error type: {type(e).__name__}")
+        print(f"🔍 PDF Generation Debug: Full error: {e}")
+        return None, None
+
+def get_ticker_from_filename(filename):
+    """Extract ticker symbol from filename or return default"""
+    if not filename:
+        return "UNKNOWN"
+    
+    # Try to extract ticker from filename
+    filename_lower = filename.lower()
+    common_tickers = ['spy', 'qqq', 'aapl', 'msft', 'tsla', 'nvda', 'googl', 'amzn', 'meta', 'nflx']
+    
+    for ticker in common_tickers:
+        if ticker in filename_lower:
+            return ticker.upper()
+    
+    # If no common ticker found, try to extract from filename
+    if '_' in filename:
+        parts = filename.split('_')
+        if len(parts) > 0:
+            potential_ticker = parts[0].upper()
+            if len(potential_ticker) <= 5:  # Most tickers are 1-5 characters
+                return potential_ticker
+    
+    return "UNKNOWN" 

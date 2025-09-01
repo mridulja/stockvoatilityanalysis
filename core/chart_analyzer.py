@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Tuple, Any
 import pandas as pd
 import numpy as np
+from pydantic import BaseModel, Field
 
 # OpenAI integration
 try:
@@ -228,7 +229,12 @@ Your analysis should ALWAYS be based on critical thinking and chart pattern tech
         • Add timeframe considerations for each strategy
         
         ### OUTPUT STRUCTURE
-        Structure your response with these sections:
+        Start your response by identifying the asset, then provide analysis:
+        
+        **ASSET IDENTIFICATION**
+        Asset: [Full company/asset name] | Symbol: [Ticker/Symbol]
+        
+        Then structure your analysis with these sections:
         - **Pattern Analysis** (pattern type, confidence level, implications)
         - **Trend & Momentum** (direction, strength, sustainability)  
         - **Volume Insights** (confirmation signals, institutional activity)
@@ -246,6 +252,53 @@ Your analysis should ALWAYS be based on critical thinking and chart pattern tech
         else:
             return base_prompt + "\n\n**DEEP MODE**: Provide exhaustive analysis with multiple scenarios and comprehensive strategy coverage."
     
+    def _parse_asset_info_from_analysis(self, analysis_content: str) -> Dict[str, str]:
+        """Parse asset info from the analysis response"""
+        
+        try:
+            # Look for the asset identification line
+            lines = analysis_content.split('\n')
+            
+            for line in lines:
+                line = line.strip()
+                # Look for pattern: "Asset: [name] | Symbol: [symbol]"
+                if 'Asset:' in line and 'Symbol:' in line:
+                    parts = line.split('|')
+                    if len(parts) >= 2:
+                        asset_part = parts[0].strip()
+                        symbol_part = parts[1].strip()
+                        
+                        company_name = asset_part.replace('Asset:', '').strip()
+                        ticker_symbol = symbol_part.replace('Symbol:', '').strip()
+                        
+                        print(f"🔍 Asset Parsing: Found - Company: {company_name}, Ticker: {ticker_symbol}")
+                        return {
+                            'company_name': company_name,
+                            'ticker_symbol': ticker_symbol
+                        }
+            
+            # Fallback: look for common patterns in content
+            content_lower = analysis_content.lower()
+            
+            # Simple pattern matching for common assets
+            if 'bitcoin' in content_lower or 'btc' in content_lower:
+                return {'company_name': 'Bitcoin', 'ticker_symbol': 'BTC'}
+            elif 'ethereum' in content_lower or 'eth' in content_lower:
+                return {'company_name': 'Ethereum', 'ticker_symbol': 'ETH'}
+            elif 'alibaba' in content_lower:
+                return {'company_name': 'Alibaba Group Holdings Ltd.', 'ticker_symbol': 'BABA'}
+            elif 'apple' in content_lower and 'aapl' in content_lower:
+                return {'company_name': 'Apple Inc.', 'ticker_symbol': 'AAPL'}
+            elif 'spy' in content_lower or 's&p 500' in content_lower:
+                return {'company_name': 'SPDR S&P 500 ETF', 'ticker_symbol': 'SPY'}
+            
+            print(f"🔍 Asset Parsing: No asset info found in analysis")
+            return {'company_name': 'Unknown', 'ticker_symbol': 'Unknown'}
+            
+        except Exception as e:
+            print(f"🔍 Asset Parsing: Error: {str(e)}")
+            return {'company_name': 'Unknown', 'ticker_symbol': 'Unknown'}
+
     def analyze_text_only(self, text_content: str, analysis_type: str = "deep", 
                          additional_context: str = "", system_prompt: str = "") -> Dict[str, Any]:
         """Analyze text-only content using GPT-5-mini (no vision required)"""
