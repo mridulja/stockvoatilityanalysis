@@ -83,13 +83,13 @@ class ChartAnalyzer:
         """Get the correct API parameters for a specific model"""
         if 'gpt-5' in model_name:
             return {
-                'max_completion_tokens': 4000,  # GPT-5 models use this
+                'max_completion_tokens': 8000,  # Increased from 3000 to handle longer prompts
                 'temperature': 1,  # GPT-5 models only support default temperature
                 'parameter_type': 'max_completion_tokens'
             }
         else:
             return {
-                'max_tokens': 4000,  # GPT-4 and other models use this
+                'max_tokens': 3000,  # GPT-4 and other models use this
                 'temperature': 0.1,  # GPT-4 models support custom temperature
                 'parameter_type': 'max_tokens'
             }
@@ -416,6 +416,7 @@ Your analysis should ALWAYS be based on critical thinking and chart pattern tech
                     "content": system_prompt
                 })
                 print(f"   Added system message ({len(system_prompt)} characters)")
+                print(f"   🔍 Debug: System prompt preview: {system_prompt[:200]}...")
             
             # Add user message with prompt and image
             messages.append({
@@ -436,6 +437,7 @@ Your analysis should ALWAYS be based on critical thinking and chart pattern tech
             })
             print(f"   Added user message with prompt and image")
             print(f"   Total messages: {len(messages)}")
+            print(f"   🔍 Debug: User prompt preview: {prompt[:200]}...")
             
             # Try primary model first
             model_to_use = self.model
@@ -467,6 +469,53 @@ Your analysis should ALWAYS be based on critical thinking and chart pattern tech
             content = response.choices[0].message.content
             print(f"   Response content length: {len(content)} characters")
             print(f"   First 100 chars: {content[:100]}...")
+            
+            # Debug: Log the entire response object
+            print(f"   🔍 Debug: Full response object type: {type(response)}")
+            print(f"   🔍 Debug: Response choices count: {len(response.choices)}")
+            print(f"   🔍 Debug: First choice type: {type(response.choices[0])}")
+            print(f"   🔍 Debug: Message type: {type(response.choices[0].message)}")
+            print(f"   🔍 Debug: Content type: {type(response.choices[0].message.content)}")
+            print(f"   🔍 Debug: Raw content: {repr(response.choices[0].message.content)}")
+            
+            # Check for content filtering
+            if hasattr(response.choices[0], 'finish_reason'):
+                print(f"   🔍 Debug: Finish reason: {response.choices[0].finish_reason}")
+            if hasattr(response.choices[0], 'finish_details'):
+                print(f"   🔍 Debug: Finish details: {response.choices[0].finish_details}")
+            
+            # Check if content filters are active
+            if hasattr(response, 'usage') and response.usage:
+                print(f"   🔍 Debug: Total tokens: {response.usage.total_tokens}")
+                print(f"   🔍 Debug: Prompt tokens: {response.usage.prompt_tokens}")
+                print(f"   🔍 Debug: Completion tokens: {response.usage.completion_tokens}")
+            
+            # Check if content is empty and try fallback
+            if not content or len(content.strip()) == 0:
+                print(f"   ⚠️ Empty response from {model_to_use}, trying fallback model...")
+                
+                if hasattr(self, 'fallback_model') and self.fallback_model != model_to_use:
+                    fallback_model = self.fallback_model
+                    print(f"\n🔄 Trying fallback model: {fallback_model}")
+                    
+                    try:
+                        fallback_response, fallback_duration = self._make_api_call(fallback_model, messages, is_fallback=True)
+                        content = fallback_response.choices[0].message.content
+                        model_to_use = fallback_model
+                        api_duration = fallback_duration
+                        
+                        print(f"   ✅ Fallback successful with {fallback_model}")
+                        print(f"   Response content length: {len(content)} characters")
+                        print(f"   First 100 chars: {content[:100]}...")
+                        
+                        if not content or len(content.strip()) == 0:
+                            raise Exception(f"Both primary ({self.model}) and fallback ({self.fallback_model}) models returned empty content")
+                            
+                    except Exception as fallback_error:
+                        print(f"   ❌ Fallback model also failed: {str(fallback_error)}")
+                        raise Exception(f"Both models returned empty content. Primary: {self.model}, Fallback: {self.fallback_model}")
+                else:
+                    raise Exception(f"Primary model {model_to_use} returned empty content and no fallback available")
             
             # Create structured response
             analysis_data = {

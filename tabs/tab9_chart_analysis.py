@@ -113,7 +113,47 @@ def render_chart_analysis_tab(results, vix_data, session_tickers):
                         st.success("Switched to GPT-4o-mini (vision supported)")
                         st.rerun()
                     
-
+                    # Test ChartAnalyzer functionality
+                    st.markdown("---")
+                    st.markdown("**🧪 ChartAnalyzer Test:**")
+                    if st.button("🔍 Test ChartAnalyzer"):
+                        try:
+                            test_analyzer = ChartAnalyzer()
+                            st.success("✅ ChartAnalyzer initialized successfully")
+                            
+                            # Test model info
+                            model_info = test_analyzer.get_model_info()
+                            st.info(f"Primary Model: {model_info['primary_model']}")
+                            st.info(f"Fallback Model: {model_info['fallback_model']}")
+                            
+                            # Test vision support
+                            vision_support = model_info['vision_support']
+                            if vision_support['primary_supports_vision']:
+                                st.success(f"✅ {model_info['primary_model']} supports vision")
+                            else:
+                                st.warning(f"⚠️ {model_info['primary_model']} does NOT support vision")
+                                
+                        except Exception as e:
+                            st.error(f"❌ ChartAnalyzer test failed: {str(e)}")
+                            st.error(f"Error type: {type(e).__name__}")
+                    
+                    # Test OpenAI API connection
+                    if st.button("🔌 Test OpenAI API"):
+                        try:
+                            test_analyzer = ChartAnalyzer()
+                            # Try to list models to test API connection
+                            test_analyzer.list_available_models()
+                            st.success("✅ OpenAI API connection successful")
+                            st.info("Check console for model information")
+                        except Exception as e:
+                            st.error(f"❌ OpenAI API test failed: {str(e)}")
+                            st.error(f"Error type: {type(e).__name__}")
+                            if "api_key" in str(e).lower():
+                                st.warning("💡 Check your OPENAI_API_KEY environment variable")
+                            elif "401" in str(e):
+                                st.warning("💡 Invalid API key - check your OpenAI account")
+                            elif "quota" in str(e).lower():
+                                st.warning("💡 API quota exceeded - check your OpenAI billing")
                 
                 # Important note about GPT-5-mini
                 if model_info['primary_model'] == 'gpt-5-mini':
@@ -373,6 +413,67 @@ def render_chart_analysis_tab(results, vix_data, session_tickers):
             st.session_state.console_logs = []
             st.rerun()
     
+    # === SESSION STATE DEBUG ===
+    with st.expander("🔍 Session State Debug"):
+        st.markdown("**Current Session State for Chart Analysis:**")
+        
+        if 'chart_analysis_results' in st.session_state:
+            results = st.session_state.chart_analysis_results
+            st.info(f"📊 Chart Analysis Results: {len(results)} analyses stored")
+            
+            if results:
+                # Show the latest analysis key
+                latest_key = list(results.keys())[-1]
+                st.success(f"✅ Latest Analysis Key: {latest_key}")
+                
+                # Show basic info about the latest analysis
+                latest_data = results[latest_key]
+                st.markdown("**Latest Analysis Data:**")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Mode", latest_data.get('mode', 'N/A'))
+                    st.metric("Filename", latest_data.get('filename', 'N/A'))
+                with col2:
+                    st.metric("Company", latest_data.get('company_name', 'N/A'))
+                    st.metric("Ticker", latest_data.get('ticker_symbol', 'N/A'))
+                
+                # Show if result exists
+                if 'result' in latest_data:
+                    result = latest_data['result']
+                    if result:
+                        st.success("✅ Analysis result exists")
+                        if 'analysis_content' in result:
+                            content_length = len(result.get('analysis_content', ''))
+                            st.info(f"📝 Analysis content length: {content_length} characters")
+                            if content_length > 0:
+                                st.success("✅ Analysis content is not empty")
+                            else:
+                                st.warning("⚠️ Analysis content is empty")
+                        else:
+                            st.warning("⚠️ No 'analysis_content' key in result")
+                    else:
+                        st.error("❌ Analysis result is None or empty")
+                else:
+                    st.error("❌ No 'result' key in analysis data")
+                
+                # Show all keys in the latest data
+                st.markdown("**All Keys in Latest Analysis Data:**")
+                st.code(list(latest_data.keys()), language="text")
+                
+                # Show all keys in the result
+                if 'result' in latest_data and latest_data['result']:
+                    st.markdown("**All Keys in Analysis Result:**")
+                    st.code(list(latest_data['result'].keys()), language="text")
+            else:
+                st.warning("⚠️ No analyses stored yet")
+        else:
+            st.warning("⚠️ 'chart_analysis_results' not in session state")
+        
+        # Show all session state keys
+        st.markdown("**All Session State Keys:**")
+        all_keys = list(st.session_state.keys())
+        st.code(all_keys, language="text")
+    
     # === STRATEGY IMPLEMENTATION GUIDE ===
     with st.expander("📋 Options Strategy Implementation Guide"):
         st.markdown("""
@@ -410,25 +511,48 @@ def _perform_chart_analysis(uploaded_file, analysis_mode, additional_context, sy
         with st.spinner("🧠 Analyzing chart with AI... This may take 30-60 seconds..."):
             
             # Initialize analyzer
-            analyzer = ChartAnalyzer()
+            try:
+                analyzer = ChartAnalyzer()
+            except Exception as e:
+                st.error(f"❌ Failed to initialize ChartAnalyzer: {str(e)}")
+                return
             
             # Determine analysis type
             analysis_type = "quick" if analysis_mode == "Quick Analysis" else "deep"
             
             # Perform analysis
             with st.spinner("🧠 Analyzing chart with AI..."):
-                analysis_result = analyzer.analyze_chart(
-                    image_file=uploaded_file,
-                    analysis_type=analysis_type,
-                    additional_context=additional_context,
-                    system_prompt=system_prompt
-                )
+                try:
+                    analysis_result = analyzer.analyze_chart(
+                        image_file=uploaded_file,
+                        analysis_type=analysis_type,
+                        additional_context=additional_context,
+                        system_prompt=system_prompt
+                    )
+                except Exception as e:
+                    st.error(f"❌ analyze_chart() failed: {str(e)}")
+                    return
+            
+            # Check if we got a valid result
+            if not analysis_result:
+                st.error("❌ Analysis result is None or empty")
+                return
             
             # Extract asset info from the analysis content
             analysis_content = analysis_result.get('analysis_content', '')
-            asset_info = analyzer._parse_asset_info_from_analysis(analysis_content)
-            company_name = asset_info.get('company_name', 'Unknown')
-            ticker_from_chart = asset_info.get('ticker_symbol', 'Unknown')
+            
+            if not analysis_content:
+                st.error("❌ Analysis content is empty - no content received from AI")
+                return
+            
+            # Parse asset info
+            try:
+                asset_info = analyzer._parse_asset_info_from_analysis(analysis_content)
+                company_name = asset_info.get('company_name', 'Unknown')
+                ticker_from_chart = asset_info.get('ticker_symbol', 'Unknown')
+            except Exception as e:
+                company_name = 'Unknown'
+                ticker_from_chart = 'Unknown'
             
             # Store results in session state
             if 'chart_analysis_results' not in st.session_state:
@@ -454,10 +578,13 @@ def _perform_chart_analysis(uploaded_file, analysis_mode, additional_context, sy
             
     except Exception as e:
         st.error(f"❌ Analysis failed: {str(e)}")
+        
         if "max_tokens" in str(e):
             st.info("💡 API parameter issue detected. Please ensure you're using the latest OpenAI library.")
         elif "401" in str(e) or "API key" in str(e):
             st.info("💡 Please check your OpenAI API key configuration.")
+        elif "vision" in str(e).lower():
+            st.info("💡 Vision model issue detected. Check if the model supports image analysis.")
         else:
             st.info("💡 Please check your OpenAI API key and model access.")
 
@@ -538,10 +665,6 @@ def _display_chart_analysis_results():
                 if st.button("📥 Generate & Download PDF Report", type="secondary", help="Generate and download a professional PDF report with metadata and disclaimer"):
                     with st.spinner("Generating PDF report..."):
                         try:
-                            # Debug info
-                            st.info(f"🔍 Debug: Generating PDF for ticker: {ticker_symbol}")
-                            st.info(f"🔍 Debug: Analysis mode: {analysis_data.get('mode', 'N/A')}")
-                            
                             pdf_bytes, pdf_filename = generate_chart_analysis_pdf(
                                 analysis_data, 
                                 analysis_result, 
@@ -562,11 +685,9 @@ def _display_chart_analysis_results():
                                 st.info("📋 Report includes: Chart image, analysis results, metadata, context, technical information (tokens used), and legal disclaimer")
                             else:
                                 st.error("❌ Failed to generate PDF report")
-                                st.error("🔍 Debug: PDF generation returned None values")
                                 
                         except Exception as e:
                             st.error(f"❌ Error generating PDF: {str(e)}")
-                            st.error(f"🔍 Debug: Exception type: {type(e).__name__}")
                             st.info("💡 Make sure you have the required PDF libraries installed")
     
     else:
@@ -622,10 +743,6 @@ def _display_chart_analysis_fallback():
         if st.button("📥 Generate & Download PDF Report", type="secondary", help="Generate and download a professional PDF report with metadata and disclaimer"):
             with st.spinner("Generating PDF report..."):
                 try:
-                    # Debug info
-                    st.info(f"🔍 Debug: Generating PDF for ticker: {ticker_symbol}")
-                    st.info(f"🔍 Debug: Analysis mode: {analysis_data.get('mode', 'N/A')}")
-                    
                     pdf_bytes, pdf_filename = generate_chart_analysis_pdf(
                         analysis_data, 
                         analysis_result, 
@@ -646,11 +763,9 @@ def _display_chart_analysis_fallback():
                         st.info("📋 Report includes: Chart image, analysis results, metadata, context, technical information (tokens used), and legal disclaimer")
                     else:
                         st.error("❌ Failed to generate PDF report")
-                        st.error("🔍 Debug: PDF generation returned None values")
                         
                 except Exception as e:
                     st.error(f"❌ Error generating PDF: {str(e)}")
-                    st.error(f"🔍 Debug: Exception type: {type(e).__name__}")
                     st.info("💡 Make sure you have the required PDF libraries installed")
         
         # Clear button
@@ -738,11 +853,6 @@ def generate_chart_analysis_pdf(analysis_data, analysis_result, ticker_symbol="U
     """Generate a professional PDF report for chart analysis results"""
     
     try:
-        # Debug info
-        print(f"🔍 PDF Generation Debug: Starting PDF generation for ticker: {ticker_symbol}")
-        print(f"🔍 PDF Generation Debug: Analysis data keys: {list(analysis_data.keys())}")
-        print(f"🔍 PDF Generation Debug: Analysis result keys: {list(analysis_result.keys())}")
-        
         # Get company info
         company_name = analysis_data.get('company_name', 'Unknown Company')
         
@@ -868,9 +978,6 @@ def generate_chart_analysis_pdf(analysis_data, analysis_result, ticker_symbol="U
                     new_width = int(img_width * scale_factor)
                     new_height = int(img_height * scale_factor)
                     pil_image = pil_image.resize((new_width, new_height), PILImage.Resampling.LANCZOS)
-                    print(f"🔍 PDF Generation Debug: Image resized from {img_width}x{img_height} to {new_width}x{new_height}")
-                else:
-                    print(f"🔍 PDF Generation Debug: Image kept at original size {img_width}x{img_height}")
                 
                 # Save to BytesIO with high quality
                 img_buffer = io.BytesIO()
@@ -897,15 +1004,10 @@ def generate_chart_analysis_pdf(analysis_data, analysis_result, ticker_symbol="U
                 )
                 story.append(Paragraph(f"Chart Image: {company_name} ({ticker_symbol}) - {analysis_data.get('mode', 'Analysis')} - High Quality (300 DPI)", caption_style))
                 
-                print(f"🔍 PDF Generation Debug: High-quality chart image added successfully using BytesIO")
-                print(f"🔍 PDF Generation Debug: Image dimensions: {pil_image.size[0]}x{pil_image.size[1]} pixels")
-                print(f"🔍 PDF Generation Debug: PDF dimensions: {pdf_width:.1f}x{pdf_height:.1f} points")
             else:
                 story.append(Paragraph("Chart image not available for this analysis", normal_style))
-                print(f"🔍 PDF Generation Debug: No chart image available")
         except Exception as e:
             story.append(Paragraph("Chart image could not be included in the report", normal_style))
-            print(f"🔍 PDF Generation Debug: Error adding chart image: {str(e)}")
         
         story.append(Spacer(1, 20))
         
@@ -1035,35 +1137,17 @@ def generate_chart_analysis_pdf(analysis_data, analysis_result, ticker_symbol="U
         # Clean up the PDF file
         if os.path.exists(pdf_filename):
             os.remove(pdf_filename)
-            print(f"🔍 PDF Generation Debug: Temporary PDF file cleaned up")
-        
-        # Debug info
-        print(f"🔍 PDF Generation Debug: PDF generated successfully!")
-        print(f"🔍 PDF Generation Debug: PDF size: {len(pdf_bytes)} bytes")
-        print(f"🔍 PDF Generation Debug: Filename: {pdf_filename}")
         
         return pdf_bytes, f"chart_analysis_{ticker_symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         
     except Exception as e:
         # Clean up any temporary files on error
-        # The BytesIO object is automatically garbage collected, so no explicit cleanup needed here
-        # if 'img_buffer' in locals() and img_buffer:
-        #     try:
-        #         img_buffer.close()
-        #         print(f"🔍 PDF Generation Debug: Cleaned up temp image file on error")
-        #     except:
-        #         pass
-        
         if 'pdf_filename' in locals() and os.path.exists(pdf_filename):
             try:
                 os.remove(pdf_filename)
-                print(f"🔍 PDF Generation Debug: Cleaned up temp PDF file on error")
             except:
                 pass
         
-        print(f"🔍 PDF Generation Debug: Error occurred: {str(e)}")
-        print(f"🔍 PDF Generation Debug: Error type: {type(e).__name__}")
-        print(f"🔍 PDF Generation Debug: Full error: {e}")
         return None, None
 
 def get_ticker_from_filename(filename):
